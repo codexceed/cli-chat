@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import sys
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,8 @@ from cli_chat import tools as tools_module
 if TYPE_CHECKING:
     from cli_chat import models
 
+logger = logging.getLogger(__name__)
+
 
 class Orchestrator:
     def __init__(self, settings: models.Settings) -> None:
@@ -26,15 +29,21 @@ class Orchestrator:
         self._history: list[oai_chat.ChatCompletionMessageParam] = []
         self._cancel_event = asyncio.Event()
         self._should_exit = False
+        self._turn_count = 0
 
     async def close(self) -> None:
+        logger.info(
+            "Orchestrator closing (turns=%d, history_len=%d)", self._turn_count, len(self._history)
+        )
         await self._tools.close()
 
     def handle_interrupt(self) -> None:
         """Called by signal handler. First call cancels; second exits."""
         if self._cancel_event.is_set():
+            logger.info("SIGINT: second interrupt, requesting exit")
             self._should_exit = True
         else:
+            logger.info("SIGINT: cancelling current operation")
             self._cancel_event.set()
 
     async def run(self) -> None:
@@ -43,21 +52,24 @@ class Orchestrator:
             self._cancel_event.clear()
             user_input = await self._read_input()
             if user_input is None:
+                logger.info("Input cancelled or EOF, exiting loop")
                 break
 
             user_input = user_input.strip()
             if not user_input:
                 continue
             if user_input.lower() in ("exit", "quit"):
+                logger.info("User requested exit via '%s'", user_input)
                 break
 
+            self._turn_count += 1
+            logger.info("Turn %d: user input: %s", self._turn_count, user_input)
             await self._process_turn(user_input)
 
     async def _read_input(self) -> str | None:
         """Read from stdin without threads, cancellable via Ctrl+C."""
         loop = asyncio.get_running_loop()
-        sys.stdout.write("\nYou: ")
-        sys.stdout.flush()
+        display.print_input_prompt()
 
         line_future: asyncio.Future[str] = loop.create_future()
 
@@ -103,7 +115,17 @@ class Orchestrator:
 
             if not tool_calls:
                 display.finish_streaming()
+                logger.info(
+                    "Turn %d: assistant responded (%d chars)", self._turn_count, len(content)
+                )
                 break
+
+            logger.info(
+                "Turn %d: LLM requested %d tool call(s): %s",
+                self._turn_count,
+                len(tool_calls),
+                [tc.function.name for tc in tool_calls],
+            )
 
             # Execute tool calls
             tool_results = await self._execute_tools(tool_calls)
@@ -118,21 +140,24 @@ class Orchestrator:
                 )
             # Loop back: LLM will process tool results
 
-    async def _stream_response(
+    async def _stream_response(  # pylint: disable=too-many-branches
         self,
     ) -> tuple[str, list[tc_module.ChatCompletionMessageToolCall]] | None:
         try:
             stream = await self._chat.stream(self._history)
         except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("LLM stream creation failed: %s", exc, exc_info=True)
             display.print_error(f"LLM error: {exc}")
             return None
 
         content = ""
         tool_calls_by_index: dict[int, dict] = {}
+        header_printed = False
 
         try:
             async for chunk in stream:
                 if self._cancel_event.is_set():
+                    logger.info("Stream cancelled by user (content so far: %d chars)", len(content))
                     await stream.close()
                     display.print_dim("\n[cancelled]")
                     return None
@@ -142,6 +167,9 @@ class Orchestrator:
                     continue
 
                 if delta.content:
+                    if not header_printed:
+                        display.print_assistant_header()
+                        header_printed = True
                     content += delta.content
                     display.print_streaming_token(delta.content)
 
@@ -164,8 +192,14 @@ class Orchestrator:
                                 entry["arguments"] += tc_delta.function.arguments
 
         except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Stream error: %s", exc, exc_info=True)
             display.print_error(f"\nStream error: {exc}")
             return None
+
+        logger.debug(
+            "Stream completed: %d chars content, %d tool calls",
+            len(content), len(tool_calls_by_index),
+        )
 
         # Build tool call objects
         tool_calls = [
@@ -185,6 +219,7 @@ class Orchestrator:
         results: list[models.ToolResult] = []
         for tc in tool_calls:
             if self._cancel_event.is_set():
+                logger.info("Tool execution cancelled before %s", tc.function.name)
                 display.print_dim("[cancelled]")
                 return None
 
@@ -192,11 +227,15 @@ class Orchestrator:
             with contextlib.suppress(json.JSONDecodeError):
                 args = json.loads(tc.function.arguments)
 
+            display.print_tool_call(tc.function.name, args)
+
             with display.tool_spinner(tc.function.name, args):
                 result = await self._tools.execute(tc, self._cancel_event)
 
             if result.error:
-                display.print_error(f"Tool error: {result.content}")
+                display.print_tool_result_error(tc.function.name, result.content)
+            else:
+                display.print_tool_result_ok(tc.function.name)
             results.append(result)
 
         return results

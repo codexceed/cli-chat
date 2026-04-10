@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import logging
+import typing
 from typing import TYPE_CHECKING
 
 import httpx
@@ -12,6 +15,8 @@ from cli_chat import models
 
 if TYPE_CHECKING:
     from openai.types.chat import chat_completion_message_tool_call as tc_module
+
+logger = logging.getLogger(__name__)
 
 TOOL_DEFINITIONS = [
     {
@@ -82,6 +87,9 @@ class ToolExecutor:
         try:
             args = json.loads(tool_call.function.arguments)
         except json.JSONDecodeError:
+            logger.error(
+                "Invalid JSON arguments for tool %s: %s", name, tool_call.function.arguments
+            )
             return models.ToolResult(
                 tool_call_id=tool_call.id,
                 name=name,
@@ -89,15 +97,21 @@ class ToolExecutor:
                 error=True,
             )
 
+        logger.info("Tool call: %s(%s)", name, args)
+
         try:
             if name == "get_weather":
                 content = await self._get_weather(args.get("location", ""), cancel_event)
             elif name == "research_topic":
                 content = await self._research_topic(args.get("topic", ""), cancel_event)
             else:
+                logger.warning("Unknown tool requested: %s", name)
                 content = f"Unknown tool: {name}"
+            logger.info("Tool %s completed successfully", name)
+            logger.debug("Tool %s result: %s", name, content[:200])
             return models.ToolResult(tool_call_id=tool_call.id, name=name, content=content)
         except asyncio.CancelledError:
+            logger.warning("Tool %s cancelled by user", name)
             return models.ToolResult(
                 tool_call_id=tool_call.id,
                 name=name,
@@ -106,6 +120,7 @@ class ToolExecutor:
             )
         except httpx.HTTPStatusError as exc:
             body = exc.response.text
+            logger.error("Tool %s HTTP error %d: %s", name, exc.response.status_code, body[:200])
             return models.ToolResult(
                 tool_call_id=tool_call.id,
                 name=name,
@@ -113,6 +128,7 @@ class ToolExecutor:
                 error=True,
             )
         except (httpx.RequestError, httpx.TimeoutException, httpx.DecodingError) as exc:
+            logger.error("Tool %s request failed: %s", name, exc)
             return models.ToolResult(
                 tool_call_id=tool_call.id,
                 name=name,
@@ -120,6 +136,7 @@ class ToolExecutor:
                 error=True,
             )
         except _RateLimitError as exc:
+            logger.warning("Tool %s rate-limited after %d retries: %s", name, MAX_RETRIES, exc)
             return models.ToolResult(
                 tool_call_id=tool_call.id,
                 name=name,
@@ -138,6 +155,10 @@ class ToolExecutor:
                 throttled = models.ThrottledResponse(**resp)
                 if attempt < MAX_RETRIES - 1:
                     wait = min(throttled.retry_after_seconds, 15)
+                    logger.warning(
+                        "Weather throttled (attempt %d/%d), retrying in %ds",
+                        attempt + 1, MAX_RETRIES, wait,
+                    )
                     await self._cancellable_sleep(wait, cancel_event)
                     continue
                 raise _RateLimitError(
@@ -146,6 +167,8 @@ class ToolExecutor:
                 )
 
             weather = models.WeatherResponse.from_api(resp)
+            response_format = "array" if "conditions" in resp else "flat"
+            logger.debug("Weather response format: %s", response_format)
             return weather.display()
 
         raise _RateLimitError("Weather request failed after retries.")
@@ -161,6 +184,10 @@ class ToolExecutor:
                 throttled = models.ThrottledResponse(**resp)
                 if attempt < MAX_RETRIES - 1:
                     wait = min(throttled.retry_after_seconds, 15)
+                    logger.warning(
+                        "Research throttled (attempt %d/%d), retrying in %ds",
+                        attempt + 1, MAX_RETRIES, wait,
+                    )
                     await self._cancellable_sleep(wait, cancel_event)
                     continue
                 raise _RateLimitError(
@@ -169,6 +196,11 @@ class ToolExecutor:
                 )
 
             research = models.ResearchResponse(**resp)
+            if research.cached:
+                logger.info(
+                    "Research returned cached result (age=%ds)",
+                    research.cache_age_seconds or 0,
+                )
             return research.display()
 
         raise _RateLimitError("Research failed after retries.")
@@ -182,7 +214,16 @@ class ToolExecutor:
         if cancel_event and cancel_event.is_set():
             raise asyncio.CancelledError
 
-        resp = await self._client.get(path, params=params)
+        logger.debug("API request: GET %s params=%s", path, params)
+
+        # Race the HTTP request against cancellation so Ctrl+C is instant
+        request_coro = self._client.get(path, params=params)
+        if cancel_event is None:
+            resp = await request_coro
+        else:
+            resp = await self._cancellable_request(request_coro, cancel_event)
+
+        logger.debug("API response: %d %s", resp.status_code, resp.headers.get("content-type", ""))
         resp.raise_for_status()
 
         # Quirk: infrastructure errors (e.g. unicode input) return HTML, not JSON
@@ -192,6 +233,28 @@ class ToolExecutor:
             raise httpx.DecodingError(msg)
 
         return resp.json()
+
+    @staticmethod
+    async def _cancellable_request(
+        request_coro: typing.Coroutine[typing.Any, typing.Any, httpx.Response],
+        cancel_event: asyncio.Event,
+    ) -> httpx.Response:
+        """Race an HTTP request against a cancel event."""
+        request_task = asyncio.create_task(request_coro)
+        cancel_task = asyncio.create_task(cancel_event.wait())
+
+        done, pending = await asyncio.wait(
+            {request_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in pending:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+        if cancel_task in done:
+            raise asyncio.CancelledError
+
+        return request_task.result()
 
     async def _cancellable_sleep(
         self, seconds: float, cancel_event: asyncio.Event | None
@@ -210,5 +273,6 @@ class ToolExecutor:
         tool_calls: list[tc_module.ChatCompletionMessageToolCall],
         cancel_event: asyncio.Event | None = None,
     ) -> list[models.ToolResult]:
+        logger.info("Executing %d tool calls in parallel", len(tool_calls))
         tasks = [self.execute(tc, cancel_event) for tc in tool_calls]
         return list(await asyncio.gather(*tasks))
