@@ -5,14 +5,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import openai
+from openai import AsyncOpenAI, AsyncStream
 
-from cli_chat import tools
+from cli_chat.tools import TOOL_DEFINITIONS
 
 if TYPE_CHECKING:
-    from openai.types import chat as oai_chat
+    from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 
-    from cli_chat import models
+    from cli_chat.models import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -24,20 +24,15 @@ SYSTEM_PROMPT = (
 
 
 class ChatClient:
-    def __init__(self, settings: models.Settings) -> None:
-        self._client = openai.AsyncOpenAI(
-            api_key=settings.openrouter_api_key,
-            base_url="https://openrouter.ai/api/v1",
-        )
+    def __init__(self, settings: Settings) -> None:
+        self._client = AsyncOpenAI(api_key=settings.openrouter_api_key, base_url="https://openrouter.ai/api/v1")
         self._model = settings.llm_model
 
-    async def stream(
-        self, messages: list[oai_chat.ChatCompletionMessageParam]
-    ) -> openai.AsyncStream[oai_chat.ChatCompletionChunk]:
+    async def stream(self, messages: list[ChatCompletionMessageParam]) -> AsyncStream[ChatCompletionChunk]:
         logger.info("LLM stream request (model=%s, messages=%d)", self._model, len(messages))
         return await self._client.chat.completions.create(
             model=self._model,
             messages=[{"role": "system", "content": SYSTEM_PROMPT}, *messages],
-            tools=tools.TOOL_DEFINITIONS,  # type: ignore[arg-type]
+            tools=TOOL_DEFINITIONS,  # type: ignore[arg-type]
             stream=True,
         )

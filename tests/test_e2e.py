@@ -50,17 +50,13 @@ def _research_call(topic: str) -> _FakeToolCall:
 
 class TestWeatherAPI:
     @pytest.mark.asyncio
-    async def test_valid_city_returns_data(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_valid_city_returns_data(self, executor: tools_module.ToolExecutor) -> None:
         result = await executor.execute(_weather_call("London"))  # type: ignore[arg-type]
         assert not result.error
         assert "London" in result.content
 
     @pytest.mark.asyncio
-    async def test_handles_array_format(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_handles_array_format(self, executor: tools_module.ToolExecutor) -> None:
         """Weather API non-deterministically returns flat or array format."""
         result = await executor.execute(_weather_call("Tokyo"))  # type: ignore[arg-type]
         assert not result.error
@@ -68,33 +64,25 @@ class TestWeatherAPI:
         # Should work regardless of which format the API returns
 
     @pytest.mark.asyncio
-    async def test_multi_word_city(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_multi_word_city(self, executor: tools_module.ToolExecutor) -> None:
         result = await executor.execute(_weather_call("San Francisco"))  # type: ignore[arg-type]
         assert not result.error
         assert "San Francisco" in result.content
 
     @pytest.mark.asyncio
-    async def test_invalid_city_returns_error(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_invalid_city_returns_error(self, executor: tools_module.ToolExecutor) -> None:
         result = await executor.execute(_weather_call("FakeCity999"))  # type: ignore[arg-type]
         assert result.error
 
     @pytest.mark.asyncio
-    async def test_empty_location_returns_error(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_empty_location_returns_error(self, executor: tools_module.ToolExecutor) -> None:
         """Empty location returns 404 or may hit rate limit — both are errors."""
         result = await executor.execute(_weather_call(""))  # type: ignore[arg-type]
         assert result.error
         assert result.content  # should have an error message
 
     @pytest.mark.asyncio
-    async def test_format_consistency_across_calls(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_format_consistency_across_calls(self, executor: tools_module.ToolExecutor) -> None:
         """Regardless of flat vs array format, our display is consistent."""
         successful = []
         for _ in range(3):
@@ -114,18 +102,14 @@ class TestWeatherAPI:
 
 class TestResearchAPI:
     @pytest.mark.asyncio
-    async def test_returns_summary(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_returns_summary(self, executor: tools_module.ToolExecutor) -> None:
         result = await executor.execute(_research_call("solar energy"))  # type: ignore[arg-type]
         assert result.content
         # Either real result or rate-limited message — both are valid
         assert not result.error or "rate-limited" in result.content
 
     @pytest.mark.asyncio
-    async def test_cached_result_shows_age(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_cached_result_shows_age(self, executor: tools_module.ToolExecutor) -> None:
         """Some topics return stale cached results with age metadata."""
         result = await executor.execute(_research_call("climate change"))  # type: ignore[arg-type]
         # If cached, should mention age; if throttled, that's ok too
@@ -133,9 +117,7 @@ class TestResearchAPI:
             assert "climate change" in result.content.lower() or "cached" in result.content.lower()
 
     @pytest.mark.asyncio
-    async def test_empty_topic_handled(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_empty_topic_handled(self, executor: tools_module.ToolExecutor) -> None:
         """API accepts empty topic without error — we should handle it."""
         result = await executor.execute(_research_call(""))  # type: ignore[arg-type]
         # Should not crash, either returns a result or throttled
@@ -147,9 +129,7 @@ class TestResearchAPI:
 
 class TestCancellation:
     @pytest.mark.asyncio
-    async def test_pre_cancelled_weather(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_pre_cancelled_weather(self, executor: tools_module.ToolExecutor) -> None:
         cancel = asyncio.Event()
         cancel.set()
         result = await executor.execute(_weather_call("London"), cancel_event=cancel)  # type: ignore[arg-type]
@@ -157,9 +137,7 @@ class TestCancellation:
         assert "cancelled" in result.content.lower()
 
     @pytest.mark.asyncio
-    async def test_pre_cancelled_research(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_pre_cancelled_research(self, executor: tools_module.ToolExecutor) -> None:
         cancel = asyncio.Event()
         cancel.set()
         result = await executor.execute(_research_call("test"), cancel_event=cancel)  # type: ignore[arg-type]
@@ -167,9 +145,7 @@ class TestCancellation:
         assert "cancelled" in result.content.lower()
 
     @pytest.mark.asyncio
-    async def test_cancel_during_research_sleep(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_cancel_during_research_sleep(self, executor: tools_module.ToolExecutor) -> None:
         """Cancel event fires during throttle retry sleep."""
         cancel = asyncio.Event()
 
@@ -185,9 +161,7 @@ class TestCancellation:
         assert result.content  # should have some content regardless
 
     @pytest.mark.asyncio
-    async def test_batch_cancellation(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_batch_cancellation(self, executor: tools_module.ToolExecutor) -> None:
         """Batch execute respects cancellation across all tool calls."""
         cancel = asyncio.Event()
         cancel.set()
@@ -203,35 +177,27 @@ class TestCancellation:
 
 class TestErrorHandling:
     @pytest.mark.asyncio
-    async def test_invalid_json_arguments(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_invalid_json_arguments(self, executor: tools_module.ToolExecutor) -> None:
         tc = _FakeToolCall("get_weather", "not valid json")
         result = await executor.execute(tc)  # type: ignore[arg-type]
         assert result.error
         assert "invalid" in result.content.lower()
 
     @pytest.mark.asyncio
-    async def test_unknown_tool_name(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_unknown_tool_name(self, executor: tools_module.ToolExecutor) -> None:
         tc = _FakeToolCall("nonexistent_tool", '{"arg": "val"}')
         result = await executor.execute(tc)  # type: ignore[arg-type]
         assert "Unknown tool" in result.content
 
     @pytest.mark.asyncio
-    async def test_unicode_location_handled_gracefully(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_unicode_location_handled_gracefully(self, executor: tools_module.ToolExecutor) -> None:
         """Unicode input causes HTML 400 from Cloud Run infra — shouldn't crash."""
         result = await executor.execute(_weather_call("東京"))  # type: ignore[arg-type]
         assert result.error or "Tokyo" not in result.content
         # Main assertion: no crash
 
     @pytest.mark.asyncio
-    async def test_special_chars_in_location(
-        self, executor: tools_module.ToolExecutor
-    ) -> None:
+    async def test_special_chars_in_location(self, executor: tools_module.ToolExecutor) -> None:
         """Special characters shouldn't cause crashes."""
         result = await executor.execute(_weather_call("London'; DROP TABLE --"))  # type: ignore[arg-type]
         # Should either return an error or handle gracefully

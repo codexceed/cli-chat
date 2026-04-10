@@ -2,29 +2,29 @@
 
 from __future__ import annotations
 
-import pydantic
-import pydantic_settings
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
 
 
-class Settings(pydantic_settings.BaseSettings):
+class Settings(BaseSettings):
     model_config = {"env_file": ".env", "extra": "ignore"}
 
-    openrouter_api_key: str = pydantic.Field(alias="OPENROUTER_API_KEY")
-    elyos_api_key: str = pydantic.Field(alias="ELYOS_API_KEY")
+    openrouter_api_key: str = Field(alias="OPENROUTER_API_KEY")
+    elyos_api_key: str = Field(alias="ELYOS_API_KEY")
     elyos_base_url: str = "https://elyos-interview-907656039105.europe-west2.run.app"
-    llm_model: str = pydantic.Field(default="openai/gpt-4o-mini", alias="LLM_MODEL")
+    llm_model: str = Field(default="openai/gpt-4o-mini", alias="LLM_MODEL")
 
 
 # ── Weather models ────────────────────────────────────────────────────────────
 
 
-class WeatherCondition(pydantic.BaseModel):
+class WeatherCondition(BaseModel):
     temperature_c: float
     condition: str
     humidity: int | float
 
 
-class WeatherResponse(pydantic.BaseModel):
+class WeatherResponse(BaseModel):
     """Normalized weather response — always uses a list of conditions."""
 
     location: str
@@ -36,14 +36,11 @@ class WeatherResponse(pydantic.BaseModel):
         """Handle both flat and array response shapes from the API."""
         if "conditions" in data:
             return cls(**data)
-        # Flat response: promote to single-element conditions list
         return cls(
             location=data["location"],
             conditions=[
                 WeatherCondition(
-                    temperature_c=data["temperature_c"],
-                    condition=data["condition"],
-                    humidity=data["humidity"],
+                    temperature_c=data["temperature_c"], condition=data["condition"], humidity=data["humidity"]
                 )
             ],
         )
@@ -60,7 +57,7 @@ class WeatherResponse(pydantic.BaseModel):
 # ── Research models ───────────────────────────────────────────────────────────
 
 
-class ResearchResponse(pydantic.BaseModel):
+class ResearchResponse(BaseModel):
     topic: str
     summary: str
     sources: list[str] = []
@@ -73,12 +70,11 @@ class ResearchResponse(pydantic.BaseModel):
         if self.sources:
             parts.append(f"Sources: {', '.join(self.sources)}")
         if self.cached and self.cache_age_seconds is not None:
-            days = self.cache_age_seconds // 86400
-            parts.append(f"Note: cached result ({days} days old)")
+            parts.append(f"Note: cached result ({self.cache_age_seconds // 86400} days old)")
         return "\n".join(parts)
 
 
-class ThrottledResponse(pydantic.BaseModel):
+class ThrottledResponse(BaseModel):
     status: str  # "throttled"
     message: str
     retry_after_seconds: int
@@ -88,7 +84,7 @@ class ThrottledResponse(pydantic.BaseModel):
 # ── Tool result wrapper ───────────────────────────────────────────────────────
 
 
-class ToolResult(pydantic.BaseModel):
+class ToolResult(BaseModel):
     tool_call_id: str
     name: str
     content: str

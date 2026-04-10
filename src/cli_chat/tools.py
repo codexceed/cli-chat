@@ -10,6 +10,7 @@ import typing
 from typing import TYPE_CHECKING
 
 import httpx
+from tenacity import RetryCallState, retry, retry_if_exception_type, stop_after_attempt
 
 from cli_chat import models
 
@@ -26,12 +27,7 @@ TOOL_DEFINITIONS = [
             "description": "Get current weather for a city. Fast response (~200ms).",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "location": {
-                        "type": "string",
-                        "description": "City name, e.g. London, Tokyo",
-                    }
-                },
+                "properties": {"location": {"type": "string", "description": "City name, e.g. London, Tokyo"}},
                 "required": ["location"],
             },
         },
@@ -40,18 +36,10 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "research_topic",
-            "description": (
-                "Research a topic in depth. Takes 3-8 seconds."
-                " Use for questions requiring detailed research."
-            ),
+            "description": "Research a topic in depth. Takes 3-8 seconds. Use for detailed research.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "topic": {
-                        "type": "string",
-                        "description": "Topic to research, e.g. 'solar energy'",
-                    }
-                },
+                "properties": {"topic": {"type": "string", "description": "Topic to research, e.g. 'solar energy'"}},
                 "required": ["topic"],
             },
         },
@@ -60,10 +48,59 @@ TOOL_DEFINITIONS = [
 
 MAX_RETRIES = 3
 REQUEST_TIMEOUT = 15.0
+MAX_THROTTLE_WAIT = 15
+
+
+# ── Retry infrastructure ─────────────────────────────────────────────────────────────────────────
+
+
+class _ThrottledError(Exception):
+    """Raised when the API returns a throttled response (HTTP 200)."""
+
+    def __init__(self, retry_after: int, endpoint: str) -> None:
+        super().__init__(f"{endpoint} throttled, retry after {retry_after}s")
+        self.retry_after = retry_after
+        self.endpoint = endpoint
 
 
 class _RateLimitError(Exception):
     """Raised when retries are exhausted due to API rate limiting."""
+
+
+def _throttle_wait(retry_state: RetryCallState) -> float:
+    exc = retry_state.outcome.exception()  # type: ignore[union-attr]
+    return min(exc.retry_after, MAX_THROTTLE_WAIT) if isinstance(exc, _ThrottledError) else 1
+
+
+def _log_before_retry(retry_state: RetryCallState) -> None:
+    exc = retry_state.outcome.exception()  # type: ignore[union-attr]
+    if isinstance(exc, _ThrottledError):
+        logger.warning(
+            "%s throttled (attempt %d/%d), retrying in %ds",
+            exc.endpoint,
+            retry_state.attempt_number,
+            MAX_RETRIES,
+            min(exc.retry_after, MAX_THROTTLE_WAIT),
+        )
+
+
+def _on_retries_exhausted(retry_state: RetryCallState) -> typing.NoReturn:
+    exc = retry_state.outcome.exception()  # type: ignore[union-attr]
+    if isinstance(exc, _ThrottledError):
+        raise _RateLimitError(f"{exc.endpoint} API is rate-limited. Please try again in {exc.retry_after}s.") from exc
+    raise _RateLimitError("Request failed after retries.")
+
+
+_throttle_retry = retry(
+    retry=retry_if_exception_type(_ThrottledError),
+    wait=_throttle_wait,  # type: ignore[arg-type]
+    stop=stop_after_attempt(MAX_RETRIES),
+    before_sleep=_log_before_retry,  # type: ignore[arg-type]
+    retry_error_callback=_on_retries_exhausted,  # type: ignore[arg-type]
+)
+
+
+# ── Tool executor ────────────────────────────────────────────────────────────────────────────────
 
 
 class ToolExecutor:
@@ -87,14 +124,9 @@ class ToolExecutor:
         try:
             args = json.loads(tool_call.function.arguments)
         except json.JSONDecodeError:
-            logger.error(
-                "Invalid JSON arguments for tool %s: %s", name, tool_call.function.arguments
-            )
+            logger.error("Invalid JSON arguments for tool %s: %s", name, tool_call.function.arguments)
             return models.ToolResult(
-                tool_call_id=tool_call.id,
-                name=name,
-                content="Error: invalid tool arguments",
-                error=True,
+                tool_call_id=tool_call.id, name=name, content="Error: invalid tool arguments", error=True
             )
 
         logger.info("Tool call: %s(%s)", name, args)
@@ -113,124 +145,56 @@ class ToolExecutor:
         except asyncio.CancelledError:
             logger.warning("Tool %s cancelled by user", name)
             return models.ToolResult(
-                tool_call_id=tool_call.id,
-                name=name,
-                content="Tool call was cancelled by the user.",
-                error=True,
+                tool_call_id=tool_call.id, name=name, content="Tool call was cancelled by the user.", error=True
             )
         except httpx.HTTPStatusError as exc:
-            body = exc.response.text
-            logger.error("Tool %s HTTP error %d: %s", name, exc.response.status_code, body[:200])
+            logger.error("Tool %s HTTP error %d: %s", name, exc.response.status_code, exc.response.text[:200])
             return models.ToolResult(
                 tool_call_id=tool_call.id,
                 name=name,
-                content=f"API error ({exc.response.status_code}): {body}",
+                content=f"API error ({exc.response.status_code}): {exc.response.text}",
                 error=True,
             )
         except (httpx.RequestError, httpx.TimeoutException, httpx.DecodingError) as exc:
             logger.error("Tool %s request failed: %s", name, exc)
-            return models.ToolResult(
-                tool_call_id=tool_call.id,
-                name=name,
-                content=f"Request failed: {exc}",
-                error=True,
-            )
+            return models.ToolResult(tool_call_id=tool_call.id, name=name, content=f"Request failed: {exc}", error=True)
         except _RateLimitError as exc:
             logger.warning("Tool %s rate-limited after %d retries: %s", name, MAX_RETRIES, exc)
-            return models.ToolResult(
-                tool_call_id=tool_call.id,
-                name=name,
-                content=str(exc),
-                error=True,
-            )
+            return models.ToolResult(tool_call_id=tool_call.id, name=name, content=str(exc), error=True)
 
-    async def _get_weather(
-        self, location: str, cancel_event: asyncio.Event | None
-    ) -> str:
-        for attempt in range(MAX_RETRIES):
-            resp = await self._request("/weather", {"location": location}, cancel_event)
+    @_throttle_retry
+    async def _get_weather(self, location: str, cancel_event: asyncio.Event | None) -> str:
+        resp = await self._request("/weather", {"location": location}, cancel_event)
+        if resp.get("status") == "throttled":
+            raise _ThrottledError(models.ThrottledResponse(**resp).retry_after_seconds, "Weather")
+        weather = models.WeatherResponse.from_api(resp)
+        logger.debug("Weather response format: %s", "array" if "conditions" in resp else "flat")
+        return weather.display()
 
-            # Quirk: weather can also be throttled (same format as research)
-            if resp.get("status") == "throttled":
-                throttled = models.ThrottledResponse(**resp)
-                if attempt < MAX_RETRIES - 1:
-                    wait = min(throttled.retry_after_seconds, 15)
-                    logger.warning(
-                        "Weather throttled (attempt %d/%d), retrying in %ds",
-                        attempt + 1, MAX_RETRIES, wait,
-                    )
-                    await self._cancellable_sleep(wait, cancel_event)
-                    continue
-                raise _RateLimitError(
-                    "Weather API is rate-limited. "
-                    f"Please try again in {throttled.retry_after_seconds}s."
-                )
+    @_throttle_retry
+    async def _research_topic(self, topic: str, cancel_event: asyncio.Event | None) -> str:
+        resp = await self._request("/research", {"topic": topic}, cancel_event)
+        if resp.get("status") == "throttled":
+            raise _ThrottledError(models.ThrottledResponse(**resp).retry_after_seconds, "Research")
+        research = models.ResearchResponse(**resp)
+        if research.cached:
+            logger.info("Research returned cached result (age=%ds)", research.cache_age_seconds or 0)
+        return research.display()
 
-            weather = models.WeatherResponse.from_api(resp)
-            response_format = "array" if "conditions" in resp else "flat"
-            logger.debug("Weather response format: %s", response_format)
-            return weather.display()
-
-        raise _RateLimitError("Weather request failed after retries.")
-
-    async def _research_topic(
-        self, topic: str, cancel_event: asyncio.Event | None
-    ) -> str:
-        for attempt in range(MAX_RETRIES):
-            resp = await self._request("/research", {"topic": topic}, cancel_event)
-
-            # Quirk: API returns HTTP 200 for throttling
-            if resp.get("status") == "throttled":
-                throttled = models.ThrottledResponse(**resp)
-                if attempt < MAX_RETRIES - 1:
-                    wait = min(throttled.retry_after_seconds, 15)
-                    logger.warning(
-                        "Research throttled (attempt %d/%d), retrying in %ds",
-                        attempt + 1, MAX_RETRIES, wait,
-                    )
-                    await self._cancellable_sleep(wait, cancel_event)
-                    continue
-                raise _RateLimitError(
-                    "Research API is rate-limited. "
-                    f"Please try again in {throttled.retry_after_seconds}s."
-                )
-
-            research = models.ResearchResponse(**resp)
-            if research.cached:
-                logger.info(
-                    "Research returned cached result (age=%ds)",
-                    research.cache_age_seconds or 0,
-                )
-            return research.display()
-
-        raise _RateLimitError("Research failed after retries.")
-
-    async def _request(
-        self,
-        path: str,
-        params: dict,
-        cancel_event: asyncio.Event | None,
-    ) -> dict:
+    async def _request(self, path: str, params: dict, cancel_event: asyncio.Event | None) -> dict:
         if cancel_event and cancel_event.is_set():
             raise asyncio.CancelledError
 
         logger.debug("API request: GET %s params=%s", path, params)
-
-        # Race the HTTP request against cancellation so Ctrl+C is instant
         request_coro = self._client.get(path, params=params)
-        if cancel_event is None:
-            resp = await request_coro
-        else:
-            resp = await self._cancellable_request(request_coro, cancel_event)
+        resp = await (self._cancellable_request(request_coro, cancel_event) if cancel_event else request_coro)
 
         logger.debug("API response: %d %s", resp.status_code, resp.headers.get("content-type", ""))
         resp.raise_for_status()
 
-        # Quirk: infrastructure errors (e.g. unicode input) return HTML, not JSON
         content_type = resp.headers.get("content-type", "")
         if "json" not in content_type:
-            msg = f"Unexpected response format (got {content_type})"
-            raise httpx.DecodingError(msg)
+            raise httpx.DecodingError(f"Unexpected response format (got {content_type})")
 
         return resp.json()
 
@@ -242,31 +206,14 @@ class ToolExecutor:
         """Race an HTTP request against a cancel event."""
         request_task = asyncio.create_task(request_coro)
         cancel_task = asyncio.create_task(cancel_event.wait())
-
-        done, pending = await asyncio.wait(
-            {request_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED
-        )
+        done, pending = await asyncio.wait({request_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
         for task in pending:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-
         if cancel_task in done:
             raise asyncio.CancelledError
-
         return request_task.result()
-
-    async def _cancellable_sleep(
-        self, seconds: float, cancel_event: asyncio.Event | None
-    ) -> None:
-        if cancel_event is None:
-            await asyncio.sleep(seconds)
-            return
-        try:
-            await asyncio.wait_for(cancel_event.wait(), timeout=seconds)
-            raise asyncio.CancelledError
-        except TimeoutError:
-            pass  # sleep completed without cancellation
 
     async def execute_batch(
         self,

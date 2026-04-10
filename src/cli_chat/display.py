@@ -16,14 +16,16 @@ from rich.theme import Theme
 # Red:    errors
 # Dim:    separators, meta, cancelled
 
-_THEME = Theme({
-    "user": "bold cyan",
-    "assistant": "bold green",
-    "tool": "yellow",
-    "tool.name": "bold yellow",
-    "error": "bold red",
-    "meta": "dim",
-})
+_THEME = Theme(
+    {
+        "user": "bold cyan",
+        "assistant": "bold green",
+        "tool": "yellow",
+        "tool.name": "bold yellow",
+        "error": "bold red",
+        "meta": "dim",
+    }
+)
 
 console = Console(theme=_THEME)
 
