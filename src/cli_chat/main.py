@@ -8,7 +8,6 @@ import logging
 import signal
 import uuid
 
-from cli_chat.display import console, print_dim
 from cli_chat.models import Settings
 from cli_chat.orchestrator import Orchestrator
 
@@ -39,14 +38,14 @@ async def _run() -> None:
     loop = asyncio.get_running_loop()
     loop.add_signal_handler(signal.SIGINT, orch.handle_interrupt)
 
-    console.print("[bold]CLI Chat[/bold] — type 'exit' to quit, Ctrl+C to cancel\n")
+    print("CLI Chat — type 'exit' to quit, Ctrl+C to cancel\n")
 
     try:
         await orch.run()
     finally:
         loop.remove_signal_handler(signal.SIGINT)
         await orch.close()
-        print_dim("\nGoodbye!")
+        print("\nGoodbye!")
         logger.info("Session ended")
 
 

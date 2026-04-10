@@ -13,18 +13,6 @@ from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionToolMessageParam, ChatCompletionUserMessageParam
 from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall, Function
 
-from cli_chat.display import (
-    finish_streaming,
-    print_assistant_header,
-    print_dim,
-    print_error,
-    print_input_prompt,
-    print_streaming_token,
-    print_tool_call,
-    print_tool_result_error,
-    print_tool_result_ok,
-    tool_spinner,
-)
 from cli_chat.tools import TOOL_DEFINITIONS, ToolExecutor
 
 if TYPE_CHECKING:
@@ -83,7 +71,9 @@ class Orchestrator:
     async def _read_input(self) -> str | None:
         """Read from stdin without threads, cancellable via Ctrl+C."""
         loop = asyncio.get_running_loop()
-        print_input_prompt()
+        print(flush=True)
+        sys.stdout.write("You: ")
+        sys.stdout.flush()
 
         line_future: asyncio.Future[str] = loop.create_future()
 
@@ -121,7 +111,8 @@ class Orchestrator:
             self._append_assistant_message(content, tool_calls)
 
             if not tool_calls:
-                finish_streaming()
+                sys.stdout.write("\n")
+                sys.stdout.flush()
                 logger.info("Turn %d: assistant responded (%d chars)", self._turn_count, len(content))
                 break
 
@@ -159,7 +150,7 @@ class Orchestrator:
             )
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("LLM stream creation failed: %s", exc, exc_info=True)
-            print_error(f"LLM error: {exc}")
+            print(f"Error: LLM error: {exc}", file=sys.stderr)
             return None
 
         content = ""
@@ -171,7 +162,7 @@ class Orchestrator:
                 if self._cancel_event.is_set():
                     logger.info("Stream cancelled by user (content so far: %d chars)", len(content))
                     await stream.close()
-                    print_dim("\n[cancelled]")
+                    print("\n[cancelled]")
                     return None
 
                 delta = chunk.choices[0].delta if chunk.choices else None
@@ -180,10 +171,11 @@ class Orchestrator:
 
                 if delta.content:
                     if not header_printed:
-                        print_assistant_header()
+                        print("\nAssistant:")
                         header_printed = True
                     content += delta.content
-                    print_streaming_token(delta.content)
+                    sys.stdout.write(delta.content)
+                    sys.stdout.flush()
 
                 if delta.tool_calls:
                     for tc_delta in delta.tool_calls:
@@ -201,7 +193,7 @@ class Orchestrator:
 
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Stream error: %s", exc, exc_info=True)
-            print_error(f"\nStream error: {exc}")
+            print(f"\nError: Stream error: {exc}", file=sys.stderr)
             return None
 
         logger.debug("Stream completed: %d chars content, %d tool calls", len(content), len(tool_calls_by_index))
@@ -219,21 +211,20 @@ class Orchestrator:
         for tc in tool_calls:
             if self._cancel_event.is_set():
                 logger.info("Tool execution cancelled before %s", tc.function.name)
-                print_dim("[cancelled]")
+                print("[cancelled]")
                 return None
 
             args = {}
             with contextlib.suppress(json.JSONDecodeError):
                 args = json.loads(tc.function.arguments)
 
-            print_tool_call(tc.function.name, args)
-            with tool_spinner(tc.function.name, args):
-                result = await self._tools.execute(tc, self._cancel_event)
+            print(f"  > {tc.function.name}({args})")
+            result = await self._tools.execute(tc, self._cancel_event)
 
             if result.error:
-                print_tool_result_error(tc.function.name, result.content)
+                print(f"  x {tc.function.name}: {result.content}")
             else:
-                print_tool_result_ok(tc.function.name)
+                print(f"  OK {tc.function.name}")
             results.append(result)
 
         return results

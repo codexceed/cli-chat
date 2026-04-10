@@ -211,12 +211,3 @@ class ToolExecutor:
         if cancel_task in done:
             raise asyncio.CancelledError
         return request_task.result()
-
-    async def execute_batch(
-        self,
-        tool_calls: list[tc_module.ChatCompletionMessageToolCall],
-        cancel_event: asyncio.Event | None = None,
-    ) -> list[models.ToolResult]:
-        logger.info("Executing %d tool calls in parallel", len(tool_calls))
-        tasks = [self.execute(tc, cancel_event) for tc in tool_calls]
-        return list(await asyncio.gather(*tasks))

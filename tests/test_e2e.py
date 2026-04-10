@@ -160,16 +160,6 @@ class TestCancellation:
         result, _ = await asyncio.gather(execute(), cancel_after_delay())
         assert result.content  # should have some content regardless
 
-    @pytest.mark.asyncio
-    async def test_batch_cancellation(self, executor: tools_module.ToolExecutor) -> None:
-        """Batch execute respects cancellation across all tool calls."""
-        cancel = asyncio.Event()
-        cancel.set()
-        results = await executor.execute_batch(
-            [_weather_call("London"), _research_call("test")],  # type: ignore[arg-type]
-            cancel_event=cancel,
-        )
-        assert all(r.error for r in results)
 
 
 # ── Error handling tests ──────────────────────────────────────────────────────
