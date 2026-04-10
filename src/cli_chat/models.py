@@ -15,9 +15,6 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="openai/gpt-4o-mini", alias="LLM_MODEL")
 
 
-# ── Weather models ────────────────────────────────────────────────────────────
-
-
 class WeatherCondition(BaseModel):
     temperature_c: float
     condition: str
@@ -54,9 +51,6 @@ class WeatherResponse(BaseModel):
         return "\n".join(parts)
 
 
-# ── Research models ───────────────────────────────────────────────────────────
-
-
 class ResearchResponse(BaseModel):
     topic: str
     summary: str
@@ -79,9 +73,6 @@ class ThrottledResponse(BaseModel):
     message: str
     retry_after_seconds: int
     data: None = None
-
-
-# ── Tool result wrapper ───────────────────────────────────────────────────────
 
 
 class ToolResult(BaseModel):

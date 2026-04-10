@@ -100,9 +100,6 @@ _throttle_retry = retry(
 )
 
 
-# ── Tool executor ────────────────────────────────────────────────────────────────────────────────
-
-
 class ToolExecutor:
     def __init__(self, settings: models.Settings) -> None:
         self._settings = settings
