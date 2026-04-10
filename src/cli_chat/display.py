@@ -9,13 +9,6 @@ from rich.live import Live
 from rich.spinner import Spinner
 from rich.theme import Theme
 
-# ── Color scheme ──────────────────────────────────────────────────────────────
-# Cyan:   user input (active/prompt)
-# Green:  assistant response (output)
-# Yellow: tool activity (processing)
-# Red:    errors
-# Dim:    separators, meta, cancelled
-
 _THEME = Theme(
     {
         "user": "bold cyan",
@@ -34,18 +27,12 @@ _CYAN_BOLD = "\033[1;36m"
 _RESET = "\033[0m"
 
 
-# ── Input area ────────────────────────────────────────────────────────────────
-
-
 def print_input_prompt() -> None:
     """Print separator + colored 'You:' prompt. Cursor stays on the same line."""
     console.print()
     console.rule(style="meta")
     sys.stdout.write(f"{_CYAN_BOLD}You:{_RESET} ")
     sys.stdout.flush()
-
-
-# ── Assistant response ────────────────────────────────────────────────────────
 
 
 def print_assistant_header() -> None:
@@ -61,9 +48,6 @@ def print_streaming_token(token: str) -> None:
 def finish_streaming() -> None:
     sys.stdout.write("\n")
     sys.stdout.flush()
-
-
-# ── Tool indicators ──────────────────────────────────────────────────────────
 
 
 def print_tool_call(tool_name: str, args: dict) -> None:
@@ -93,9 +77,6 @@ def print_tool_result_ok(tool_name: str) -> None:
 
 def print_tool_result_error(tool_name: str, message: str) -> None:
     console.print(f"  [error]✗ {tool_name}:[/error] {message}")
-
-
-# ── General ───────────────────────────────────────────────────────────────────
 
 
 def print_error(msg: str) -> None:

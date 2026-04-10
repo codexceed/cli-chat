@@ -9,10 +9,10 @@ import logging
 import sys
 from typing import TYPE_CHECKING
 
+from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionToolMessageParam, ChatCompletionUserMessageParam
 from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall, Function
 
-from cli_chat.chat import ChatClient
 from cli_chat.display import (
     finish_streaming,
     print_assistant_header,
@@ -25,7 +25,7 @@ from cli_chat.display import (
     print_tool_result_ok,
     tool_spinner,
 )
-from cli_chat.tools import ToolExecutor
+from cli_chat.tools import TOOL_DEFINITIONS, ToolExecutor
 
 if TYPE_CHECKING:
     from openai.types.chat import ChatCompletionMessageParam
@@ -34,10 +34,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+SYSTEM_PROMPT = "You are a helpful assistant. Be concise and helpful."
+
 
 class Orchestrator:
     def __init__(self, settings: Settings) -> None:
-        self._chat = ChatClient(settings)
+        self._client = AsyncOpenAI(api_key=settings.openrouter_api_key, base_url="https://openrouter.ai/api/v1")
+        self._model = settings.llm_model
         self._tools = ToolExecutor(settings)
         self._history: list[ChatCompletionMessageParam] = []
         self._cancel_event = asyncio.Event()
@@ -147,7 +150,13 @@ class Orchestrator:
 
     async def _stream_response(self) -> tuple[str, list[ChatCompletionMessageToolCall]] | None:  # pylint: disable=too-many-branches
         try:
-            stream = await self._chat.stream(self._history)
+            logger.info("LLM stream request (model=%s, messages=%d)", self._model, len(self._history))
+            stream = await self._client.chat.completions.create(
+                model=self._model,
+                messages=[{"role": "system", "content": SYSTEM_PROMPT}, *self._history],
+                tools=TOOL_DEFINITIONS,  # type: ignore[arg-type]
+                stream=True,
+            )
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("LLM stream creation failed: %s", exc, exc_info=True)
             print_error(f"LLM error: {exc}")
