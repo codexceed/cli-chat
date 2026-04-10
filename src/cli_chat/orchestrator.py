@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionToolMessageParam, ChatCompletionUserMessageParam
 from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall, Function
+from rich.live import Live
+from rich.spinner import Spinner
 
 from cli_chat.tools import TOOL_DEFINITIONS, ToolExecutor
 
@@ -219,7 +221,8 @@ class Orchestrator:
                 args = json.loads(tc.function.arguments)
 
             print(f"  > {tc.function.name}({args})")
-            result = await self._tools.execute(tc, self._cancel_event)
+            with Live(Spinner("dots", text=f"{tc.function.name}..."), transient=True):
+                result = await self._tools.execute(tc, self._cancel_event)
 
             if result.error:
                 print(f"  x {tc.function.name}: {result.content}")
