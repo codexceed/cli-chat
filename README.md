@@ -67,8 +67,7 @@ The application uses an **orchestrator pattern** — a central coordinator manag
 ```
 src/cli_chat/
 ├── main.py          # entry point, signal wiring
-├── orchestrator.py  # turn lifecycle, history, cancellation
-├── chat.py          # LLM streaming via OpenRouter
+├── orchestrator.py  # turn lifecycle, history, LLM streaming, cancellation
 ├── tools.py         # API calls with retry + quirk handling
 ├── models.py        # pydantic models (settings, responses)
 └── display.py       # streaming output, spinners

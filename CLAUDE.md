@@ -14,7 +14,7 @@ Take-home interview project: CLI chat app with streaming LLM + tool calling agai
 
 ## Key decisions
 
-- OpenRouter (OpenAI-compatible) for LLM, model configurable via LLM_MODEL in .env
+- Any OpenAI-compatible endpoint for LLM, configurable via LLM_BASE_URL and LLM_MODEL in .env
 - httpx async for external API calls, with `asyncio.wait` racing requests against cancel events
 - Pydantic for all data models + settings
 - Tenacity `@retry` decorator for throttle retry (custom wait from `retry_after_seconds`)

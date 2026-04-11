@@ -7,10 +7,9 @@ The application follows an **orchestrator pattern** where a central coordinator 
 ```mermaid
 graph TD
     A[main.py] -->|creates, configures logging, wires signals| B[Orchestrator]
-    B -->|streams LLM requests| C[ChatClient]
+    B -->|OpenAI SDK streaming| F[LLM API]
     B -->|dispatches tool calls| D[ToolExecutor]
     B -->|renders output| E[Display]
-    C -->|OpenAI SDK| F[OpenRouter API]
     D -->|httpx async + tenacity retry| G[Elyos Weather API]
     D -->|httpx async + tenacity retry| H[Elyos Research API]
 ```
@@ -20,8 +19,7 @@ graph TD
 | Module           | Role                                                    | Stateful? |
 | ---------------- | ------------------------------------------------------- | --------- |
 | `main.py`        | Entry point, logging config, asyncio loop, SIGINT wiring | No        |
-| `orchestrator.py`| Turn lifecycle, conversation history, cancellation       | Yes       |
-| `chat.py`        | LLM streaming via OpenRouter                            | No        |
+| `orchestrator.py`| Turn lifecycle, conversation history, LLM streaming, cancellation | Yes       |
 | `tools.py`       | API calls, tenacity retry, cancellable requests          | No        |
 | `models.py`      | Pydantic models for API responses, settings, tool results| No        |
 | `display.py`     | Themed output (rich), spinners, tool indicators          | No        |
@@ -32,14 +30,14 @@ graph TD
 sequenceDiagram
     participant U as User
     participant O as Orchestrator
-    participant C as ChatClient
+    participant L as LLM API
     participant T as ToolExecutor
     participant D as Display
 
     U->>O: input text
-    O->>C: stream(history)
+    O->>L: stream(history)
     loop streaming chunks
-        C-->>O: content delta / tool_call delta
+        L-->>O: content delta / tool_call delta
         O->>D: print_streaming_token()
     end
     alt tool calls detected
@@ -48,10 +46,10 @@ sequenceDiagram
         O->>T: execute(tool_call, cancel_event)
         T-->>O: ToolResult
         O->>D: print_tool_result_ok/error()
-        O->>C: stream(history + tool results)
+        O->>L: stream(history + tool results)
         loop streaming final response
             O->>D: print_assistant_header()
-            C-->>O: content delta
+            L-->>O: content delta
             O->>D: print_streaming_token()
         end
     end
@@ -141,7 +139,7 @@ flowchart LR
 
 ## Key Design Decisions
 
-1. **Orchestrator owns all state** — ChatClient and ToolExecutor are stateless workers. This makes the system easy to reason about and test.
+1. **Orchestrator owns all state** — ToolExecutor and Display are stateless workers. This makes the system easy to reason about and test.
 2. **Cancel via asyncio.Event** — shared between orchestrator and tool executor, checked cooperatively. HTTP requests are raced against the event for instant cancellation.
 3. **Pydantic normalization** — `WeatherResponse.from_api()` handles the non-deterministic API schemas at the boundary, so downstream code always sees a consistent model.
 4. **Tenacity for retry** — `@_throttle_retry` decorator with custom wait strategy reading `retry_after_seconds` from the API response. Keeps method bodies clean.
