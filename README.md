@@ -5,7 +5,6 @@ A command-line chat application with streaming LLM responses and tool calling. B
 ## Requirements
 
 - Python 3.12+
-- [uv](https://docs.astral.sh/uv/)
 - API keys in `.env`:
   ```
   OPENROUTER_API_KEY=sk-or-...
@@ -14,14 +13,30 @@ A command-line chat application with streaming LLM responses and tool calling. B
 
 ## Setup
 
+### With uv (recommended)
+
 ```bash
-make install
+make install   # runs uv sync
+make run       # runs uv run cli-chat
+```
+
+### Without uv (bare Python)
+
+```bash
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install .
 ```
 
 ## Usage
 
 ```bash
+# With uv
 make run
+
+# Without uv
+source .venv/bin/activate
+cli-chat
 ```
 
 **Example session:**
