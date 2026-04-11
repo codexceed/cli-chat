@@ -110,6 +110,14 @@ class Orchestrator:
                 break
 
             content, tool_calls = result
+
+            # Cancelled mid-stream: save partial content to history and stop
+            if self._cancel_event.is_set():
+                if content:
+                    self._append_assistant_message(content + "\n[cancelled]", [])
+                    logger.info("Turn %d: saved partial response (%d chars)", self._turn_count, len(content))
+                break
+
             self._append_assistant_message(content, tool_calls)
 
             if not tool_calls:
@@ -164,8 +172,13 @@ class Orchestrator:
                 if self._cancel_event.is_set():
                     logger.info("Stream cancelled by user (content so far: %d chars)", len(content))
                     await stream.close()
-                    print("\n[cancelled]")
-                    return None
+                    if content:
+                        finish_streaming()
+                        print_dim("[cancelled]")
+                    else:
+                        print_dim("\n[cancelled]")
+                    # Return partial content so it can be saved to history
+                    return content, []
 
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if delta is None:
