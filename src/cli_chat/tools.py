@@ -256,6 +256,9 @@ class ToolExecutor:
         resp = await self._request("/research", {"topic": topic}, cancel_event)
         if resp.get("status") == "throttled":
             raise _ThrottledError(models.ThrottledResponse(**resp).retry_after_seconds, "Research")
+        if not resp or "topic" not in resp or not resp.get("summary"):
+            logger.warning("Research returned empty/incomplete response: %s", resp)
+            return f"Research for '{topic}' returned no results."
         research = models.ResearchResponse(**resp)
         if research.cached:
             logger.info("Research returned cached result (age=%ds)", research.cache_age_seconds or 0)
