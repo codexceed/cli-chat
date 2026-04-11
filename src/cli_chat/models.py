@@ -9,10 +9,11 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     model_config = {"env_file": ".env", "extra": "ignore"}
 
-    openrouter_api_key: str = Field(alias="OPENROUTER_API_KEY")
+    llm_api_key: str = Field(alias="LLM_API_KEY")
+    llm_base_url: str = Field(default="https://openrouter.ai/api/v1", alias="LLM_BASE_URL")
+    llm_model: str = Field(default="openai/gpt-4o-mini", alias="LLM_MODEL")
     elyos_api_key: str = Field(alias="ELYOS_API_KEY")
     elyos_base_url: str = "https://elyos-interview-907656039105.europe-west2.run.app"
-    llm_model: str = Field(default="openai/gpt-4o-mini", alias="LLM_MODEL")
 
 
 class WeatherCondition(BaseModel):
@@ -30,7 +31,18 @@ class WeatherResponse(BaseModel):
 
     @classmethod
     def from_api(cls, data: dict) -> WeatherResponse:
-        """Handle both flat and array response shapes from the API."""
+        """Normalize a raw API dict into a ``WeatherResponse``.
+
+        Handles both the flat single-condition shape and the array
+        ``conditions`` shape that the weather API returns
+        non-deterministically.
+
+        Args:
+            data: Raw JSON dict from the weather API.
+
+        Returns:
+            A normalized ``WeatherResponse`` with a conditions list.
+        """
         if "conditions" in data:
             return cls(**data)
         return cls(
@@ -43,6 +55,12 @@ class WeatherResponse(BaseModel):
         )
 
     def display(self) -> str:
+        """Format the weather data as a human-readable multi-line string.
+
+        Returns:
+            Formatted weather summary including location, conditions,
+            and optional note.
+        """
         parts = [f"Weather in {self.location}:"]
         for c in self.conditions:
             parts.append(f"  {c.condition}, {c.temperature_c}°C, {c.humidity}% humidity")
@@ -60,6 +78,14 @@ class ResearchResponse(BaseModel):
     cache_age_seconds: int | None = None
 
     def display(self) -> str:
+        """Format the research result as a human-readable multi-line string.
+
+        Includes sources when available, and a staleness warning for
+        cached results.
+
+        Returns:
+            Formatted research summary.
+        """
         parts = [self.summary]
         if self.sources:
             parts.append(f"Sources: {', '.join(self.sources)}")

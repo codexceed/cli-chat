@@ -38,8 +38,16 @@ SYSTEM_PROMPT = "You are a helpful assistant. Be concise and helpful."
 
 
 class Orchestrator:
+    """Manages the chat turn lifecycle, conversation history, and cancellation."""
+
     def __init__(self, settings: Settings) -> None:
-        self._client = AsyncOpenAI(api_key=settings.openrouter_api_key, base_url="https://openrouter.ai/api/v1")
+        """Initialize the orchestrator with an LLM client and tool executor.
+
+        Args:
+            settings: Application settings containing LLM and API
+                configuration.
+        """
+        self._client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url)
         self._model = settings.llm_model
         self._tools = ToolExecutor(settings)
         self._history: list[ChatCompletionMessageParam] = []
@@ -48,11 +56,16 @@ class Orchestrator:
         self._turn_count = 0
 
     async def close(self) -> None:
+        """Shut down the tool executor and release resources."""
         logger.info("Orchestrator closing (turns=%d, history_len=%d)", self._turn_count, len(self._history))
         await self._tools.close()
 
     def handle_interrupt(self) -> None:
-        """Called by signal handler. First call cancels; second exits."""
+        """Handle a SIGINT signal.
+
+        First invocation cancels the current operation. Second invocation
+        requests a full exit from the run loop.
+        """
         if self._cancel_event.is_set():
             logger.info("SIGINT: second interrupt, requesting exit")
             self._should_exit = True
@@ -61,7 +74,11 @@ class Orchestrator:
             self._cancel_event.set()
 
     async def run(self) -> None:
-        """Main input loop."""
+        """Run the main read-eval-print loop until the user exits.
+
+        Reads user input, processes each turn through the LLM, and
+        handles exit commands (``exit``, ``quit``, EOF, Ctrl+C).
+        """
         while not self._should_exit:
             self._cancel_event.clear()
             user_input = await self._read_input()
@@ -81,13 +98,21 @@ class Orchestrator:
             await self._process_turn(user_input)
 
     async def _read_input(self) -> str | None:
-        """Read from stdin without threads, cancellable via Ctrl+C."""
+        """Read a line from stdin using ``loop.add_reader``, without threads.
+
+        The read is raced against the cancel event so Ctrl+C returns
+        immediately instead of blocking.
+
+        Returns:
+            The stripped input line, or ``None`` if cancelled or EOF.
+        """
         loop = asyncio.get_running_loop()
         print_input_prompt()
 
         line_future: asyncio.Future[str] = loop.create_future()
 
         def _on_stdin_ready() -> None:
+            """Callback fired when stdin has data ready to read."""
             if not line_future.done():
                 line_future.set_result(sys.stdin.readline())
 
@@ -110,6 +135,15 @@ class Orchestrator:
         return line.rstrip("\n") if line else None
 
     async def _process_turn(self, user_input: str) -> None:
+        """Process a single conversation turn.
+
+        Streams the LLM response, executes any requested tool calls, and
+        loops until the assistant produces a final text reply or the
+        operation is cancelled.
+
+        Args:
+            user_input: The user's message text for this turn.
+        """
         self._history.append(ChatCompletionUserMessageParam(role="user", content=user_input))
 
         while not self._should_exit:
@@ -157,6 +191,15 @@ class Orchestrator:
                 )
 
     async def _stream_response(self) -> tuple[str, list[ChatCompletionMessageToolCall]] | None:  # pylint: disable=too-many-branches
+        """Stream a chat completion from the LLM and collect the result.
+
+        Prints tokens to stdout as they arrive. Handles mid-stream
+        cancellation by closing the stream and returning partial content.
+
+        Returns:
+            A tuple of ``(content, tool_calls)`` on success, or ``None``
+            if a fatal error occurs during streaming.
+        """
         try:
             logger.info("LLM stream request (model=%s, messages=%d)", self._model, len(self._history))
             stream = await self._client.chat.completions.create(
@@ -228,6 +271,15 @@ class Orchestrator:
         return content, tool_calls
 
     async def _execute_tools(self, tool_calls: list[ChatCompletionMessageToolCall]) -> list[ToolResult] | None:
+        """Execute a list of tool calls sequentially with cancellation checks.
+
+        Args:
+            tool_calls: Tool calls requested by the LLM.
+
+        Returns:
+            List of ``ToolResult`` objects, or ``None`` if cancelled
+            before all tools complete.
+        """
         results: list[ToolResult] = []
         for tc in tool_calls:
             if self._cancel_event.is_set():
@@ -252,6 +304,15 @@ class Orchestrator:
         return results
 
     def _append_assistant_message(self, content: str, tool_calls: list[ChatCompletionMessageToolCall]) -> None:
+        """Append an assistant message to the conversation history.
+
+        Builds a dict with optional ``content`` and ``tool_calls`` fields
+        and adds it to ``_history``.
+
+        Args:
+            content: The assistant's text response (may be empty).
+            tool_calls: Tool calls the assistant requested (may be empty).
+        """
         msg: dict = {"role": "assistant"}
         if content:
             msg["content"] = content

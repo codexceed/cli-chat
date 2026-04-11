@@ -8,9 +8,10 @@ A command-line chat application with streaming LLM responses and tool calling. B
 - [uv](https://docs.astral.sh/uv/)
 - API keys in `.env`:
   ```
-  OPENROUTER_API_KEY=sk-or-...
+  LLM_API_KEY=sk-...
   ELYOS_API_KEY=...
   ```
+  Optional overrides: `LLM_BASE_URL` (default: OpenRouter), `LLM_MODEL` (default: `openai/gpt-4o-mini`)
 
 ## Setup
 
