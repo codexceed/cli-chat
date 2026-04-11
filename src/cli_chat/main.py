@@ -16,6 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 def _configure_logging() -> str:
+    """Set up file-only DEBUG logging with a unique session filename.
+
+    Noisy third-party loggers (httpx, openai, httpcore) are suppressed to
+    WARNING level.
+
+    Returns:
+        The path to the created log file.
+    """
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     session_id = uuid.uuid4().hex[:8]
     log_file = f"cli_chat_{timestamp}_{session_id}.log"
@@ -31,6 +39,7 @@ def _configure_logging() -> str:
 
 
 async def _run() -> None:
+    """Initialize settings, logging, and signal handling, then start the orchestrator."""
     settings = Settings()  # type: ignore[call-arg]
     log_file = _configure_logging()
     logger.info("Session started (model=%s, log_file=%s)", settings.llm_model, log_file)
@@ -51,6 +60,7 @@ async def _run() -> None:
 
 
 def main() -> None:
+    """CLI entry point that runs the async application loop."""
     asyncio.run(_run())
 
 
