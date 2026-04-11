@@ -121,7 +121,7 @@ class Orchestrator:
         cancel_task = asyncio.create_task(self._cancel_event.wait())
 
         try:
-            await asyncio.wait({asyncio.ensure_future(line_future), cancel_task}, return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.wait({line_future, cancel_task}, return_when=asyncio.FIRST_COMPLETED)
         finally:
             loop.remove_reader(fd)
             if not cancel_task.done():
