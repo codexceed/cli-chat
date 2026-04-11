@@ -57,7 +57,7 @@ make check      # lint + test (CI gate)
 
 ## Design
 
-The application uses an **orchestrator pattern** — a central coordinator manages the conversation turn lifecycle, delegating to stateless workers for LLM streaming and tool execution. See [ARCHITECTURE.md](ARCHITECTURE.md) for diagrams and detailed design rationale.
+The application uses flat async functions to manage the conversation turn lifecycle, with a `ToolExecutor` class handling API calls. See [ARCHITECTURE.md](ARCHITECTURE.md) for diagrams and detailed design rationale.
 
 **API quirks** discovered during development are documented in [DISCOVERIES.md](DISCOVERIES.md).
 
@@ -65,10 +65,6 @@ The application uses an **orchestrator pattern** — a central coordinator manag
 
 ```
 src/cli_chat/
-├── main.py          # entry point, signal wiring
-├── orchestrator.py  # turn lifecycle, history, cancellation
-├── chat.py          # LLM streaming via OpenRouter
-├── tools.py         # API calls with retry + quirk handling
-├── models.py        # pydantic models (settings, responses)
-└── display.py       # streaming output, spinners
+├── orchestrator.py  # entry point, turn lifecycle, LLM streaming, cancellation
+└── tools.py         # API calls with retry, response formatting
 ```
