@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .env
+.env.*
 .ruff_cache/
 .pytest_cache/
 .pyright/
@@ -9,3 +10,6 @@ __pycache__/
 dist/
 build/
 *.log
+.vscode/
+IMPLEMENTATION.md
+take_home.md
