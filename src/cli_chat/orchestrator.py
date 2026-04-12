@@ -148,11 +148,20 @@ class Orchestrator:
         Args:
             user_input: The user's message text for this turn.
         """
+        rollback_point = len(self._history)
         self._history.append(ChatCompletionUserMessageParam(role="user", content=user_input))
 
         while not self._should_exit:
             result = await self._stream_response()
             if result is None:
+                # Infra failure: roll back so the next turn starts from a clean history,
+                # instead of leaving a dangling user message or partial tool_call/result pairs.
+                logger.info(
+                    "Turn %d: rolling back %d history entries after stream failure",
+                    self._turn_count,
+                    len(self._history) - rollback_point,
+                )
+                del self._history[rollback_point:]
                 break
 
             content, tool_calls = result
