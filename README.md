@@ -6,12 +6,17 @@ A command-line chat application with streaming LLM responses and tool calling. B
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
-- API keys in `.env`:
+- Environment variables:
+  - `LLM_API_KEY` (required)
+  - `ELYOS_API_KEY` (required)
+  - `LLM_BASE_URL` (optional, default: OpenRouter)
+  - `LLM_MODEL` (optional, default: `openai/gpt-4o-mini`)
+
+  Set them however you prefer — exported in your shell, via CI secrets, or dropped into a local `.env` file, which `pydantic-settings` picks up automatically:
   ```
   LLM_API_KEY=sk-...
   ELYOS_API_KEY=...
   ```
-  Optional overrides: `LLM_BASE_URL` (default: OpenRouter), `LLM_MODEL` (default: `openai/gpt-4o-mini`)
 
 ## Setup
 
