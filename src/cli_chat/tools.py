@@ -7,43 +7,42 @@ import contextlib
 import json
 import logging
 import typing
-from typing import TYPE_CHECKING
 
 import httpx
 import tenacity
+from openai.types.chat import chat_completion_function_tool_param as tool_param
+from openai.types.chat import chat_completion_message_tool_call as tc_module
+from openai.types.shared_params import function_definition
 
 from cli_chat import models
-
-if TYPE_CHECKING:
-    from openai.types.chat import chat_completion_message_tool_call as tc_module
 
 logger = logging.getLogger(__name__)
 
 TOOL_DEFINITIONS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_weather",
-            "description": "Get current weather for a city. Fast response (~200ms).",
-            "parameters": {
+    tool_param.ChatCompletionFunctionToolParam(
+        type="function",
+        function=function_definition.FunctionDefinition(
+            name="get_weather",
+            description="Get current weather for a city. Fast response (~200ms).",
+            parameters={
                 "type": "object",
                 "properties": {"location": {"type": "string", "description": "City name, e.g. London, Tokyo"}},
                 "required": ["location"],
             },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "research_topic",
-            "description": "Research a topic in depth. Takes 3-8 seconds. Use for detailed research.",
-            "parameters": {
+        ),
+    ),
+    tool_param.ChatCompletionFunctionToolParam(
+        type="function",
+        function=function_definition.FunctionDefinition(
+            name="research_topic",
+            description="Research a topic in depth. Takes 3-8 seconds. Use for detailed research.",
+            parameters={
                 "type": "object",
                 "properties": {"topic": {"type": "string", "description": "Topic to research, e.g. 'solar energy'"}},
                 "required": ["topic"],
             },
-        },
-    },
+        ),
+    ),
 ]
 
 MAX_RETRIES = 3
