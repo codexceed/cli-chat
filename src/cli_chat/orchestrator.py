@@ -10,7 +10,11 @@ import sys
 from typing import TYPE_CHECKING
 
 from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletionToolMessageParam, ChatCompletionUserMessageParam
+from openai.types.chat import (
+    ChatCompletionAssistantMessageParam,
+    ChatCompletionToolMessageParam,
+    ChatCompletionUserMessageParam,
+)
 from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall, Function
 
 from cli_chat.display import (
@@ -306,14 +310,11 @@ class Orchestrator:
     def _append_assistant_message(self, content: str, tool_calls: list[ChatCompletionMessageToolCall]) -> None:
         """Append an assistant message to the conversation history.
 
-        Builds a dict with optional ``content`` and ``tool_calls`` fields
-        and adds it to ``_history``.
-
         Args:
             content: The assistant's text response (may be empty).
             tool_calls: Tool calls the assistant requested (may be empty).
         """
-        msg: dict = {"role": "assistant"}
+        msg = ChatCompletionAssistantMessageParam(role="assistant")
         if content:
             msg["content"] = content
         if tool_calls:
@@ -325,4 +326,4 @@ class Orchestrator:
                 }
                 for tc in tool_calls
             ]
-        self._history.append(msg)  # type: ignore[arg-type]
+        self._history.append(msg)
