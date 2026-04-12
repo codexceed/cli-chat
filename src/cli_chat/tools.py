@@ -10,7 +10,7 @@ import typing
 from typing import TYPE_CHECKING
 
 import httpx
-from tenacity import RetryCallState, retry, retry_if_exception_type, stop_after_attempt
+import tenacity
 
 from cli_chat import models
 
@@ -74,7 +74,7 @@ class _RateLimitError(Exception):
     """Raised when retries are exhausted due to API rate limiting."""
 
 
-def _throttle_wait(retry_state: RetryCallState) -> float:
+def _throttle_wait(retry_state: tenacity.RetryCallState) -> float:
     """Compute the wait time before the next retry attempt.
 
     Uses the ``retry_after`` value from a ``_ThrottledError``, capped at
@@ -90,7 +90,7 @@ def _throttle_wait(retry_state: RetryCallState) -> float:
     return min(exc.retry_after, MAX_THROTTLE_WAIT) if isinstance(exc, _ThrottledError) else 1
 
 
-def _log_before_retry(retry_state: RetryCallState) -> None:
+def _log_before_retry(retry_state: tenacity.RetryCallState) -> None:
     """Log a warning before each throttle retry attempt.
 
     Args:
@@ -107,7 +107,7 @@ def _log_before_retry(retry_state: RetryCallState) -> None:
         )
 
 
-def _on_retries_exhausted(retry_state: RetryCallState) -> typing.NoReturn:
+def _on_retries_exhausted(retry_state: tenacity.RetryCallState) -> typing.NoReturn:
     """Raise a ``_RateLimitError`` after all retry attempts are exhausted.
 
     Args:
@@ -122,10 +122,10 @@ def _on_retries_exhausted(retry_state: RetryCallState) -> typing.NoReturn:
     raise _RateLimitError("Request failed after retries.")
 
 
-_throttle_retry = retry(
-    retry=retry_if_exception_type(_ThrottledError),
+_throttle_retry = tenacity.retry(
+    retry=tenacity.retry_if_exception_type(_ThrottledError),
     wait=_throttle_wait,  # type: ignore[arg-type]
-    stop=stop_after_attempt(MAX_RETRIES),
+    stop=tenacity.stop_after_attempt(MAX_RETRIES),
     before_sleep=_log_before_retry,  # type: ignore[arg-type]
     retry_error_callback=_on_retries_exhausted,  # type: ignore[arg-type]
 )

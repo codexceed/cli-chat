@@ -9,32 +9,14 @@ import logging
 import sys
 from typing import TYPE_CHECKING
 
-from openai import AsyncOpenAI
-from openai.types.chat import (
-    ChatCompletionAssistantMessageParam,
-    ChatCompletionToolMessageParam,
-    ChatCompletionUserMessageParam,
-)
-from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall, Function
+import openai
+from openai.types import chat as openai_chat
+from openai.types.chat import chat_completion_message_tool_call as tc_mod
 
-from cli_chat.display import (
-    finish_streaming,
-    print_assistant_header,
-    print_dim,
-    print_error,
-    print_input_prompt,
-    print_streaming_token,
-    print_tool_call,
-    print_tool_result_error,
-    print_tool_result_ok,
-    tool_spinner,
-)
-from cli_chat.tools import TOOL_DEFINITIONS, ToolExecutor
+from cli_chat import display, tools
 
 if TYPE_CHECKING:
-    from openai.types.chat import ChatCompletionMessageParam
-
-    from cli_chat.models import Settings, ToolResult
+    from cli_chat import models
 
 logger = logging.getLogger(__name__)
 
@@ -44,17 +26,17 @@ SYSTEM_PROMPT = "You are a helpful assistant. Be concise and helpful."
 class Orchestrator:
     """Manages the chat turn lifecycle, conversation history, and cancellation."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: models.Settings) -> None:
         """Initialize the orchestrator with an LLM client and tool executor.
 
         Args:
             settings: Application settings containing LLM and API
                 configuration.
         """
-        self._client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url)
+        self._client = openai.AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url)
         self._model = settings.llm_model
-        self._tools = ToolExecutor(settings)
-        self._history: list[ChatCompletionMessageParam] = []
+        self._tools = tools.ToolExecutor(settings)
+        self._history: list[openai_chat.ChatCompletionMessageParam] = []
         self._cancel_event = asyncio.Event()
         self._should_exit = False
         self._turn_count = 0
@@ -111,7 +93,7 @@ class Orchestrator:
             The stripped input line, or ``None`` if cancelled or EOF.
         """
         loop = asyncio.get_running_loop()
-        print_input_prompt()
+        display.print_input_prompt()
 
         line_future: asyncio.Future[str] = loop.create_future()
 
@@ -149,7 +131,7 @@ class Orchestrator:
             user_input: The user's message text for this turn.
         """
         rollback_point = len(self._history)
-        self._history.append(ChatCompletionUserMessageParam(role="user", content=user_input))
+        self._history.append(openai_chat.ChatCompletionUserMessageParam(role="user", content=user_input))
 
         while not self._should_exit:
             result = await self._stream_response()
@@ -176,7 +158,7 @@ class Orchestrator:
             self._append_assistant_message(content, tool_calls)
 
             if not tool_calls:
-                finish_streaming()
+                display.finish_streaming()
                 logger.info("Turn %d: assistant responded (%d chars)", self._turn_count, len(content))
                 break
 
@@ -192,7 +174,7 @@ class Orchestrator:
                 # Cancelled: add stub tool results so history stays valid for the LLM
                 for tc in tool_calls:
                     self._history.append(
-                        ChatCompletionToolMessageParam(
+                        openai_chat.ChatCompletionToolMessageParam(
                             role="tool", tool_call_id=tc.id, content="[cancelled by user]"
                         )
                     )
@@ -200,10 +182,12 @@ class Orchestrator:
 
             for tr in tool_results:
                 self._history.append(
-                    ChatCompletionToolMessageParam(role="tool", tool_call_id=tr.tool_call_id, content=tr.content)
+                    openai_chat.ChatCompletionToolMessageParam(
+                        role="tool", tool_call_id=tr.tool_call_id, content=tr.content
+                    )
                 )
 
-    async def _stream_response(self) -> tuple[str, list[ChatCompletionMessageToolCall]] | None:  # pylint: disable=too-many-branches
+    async def _stream_response(self) -> tuple[str, list[tc_mod.ChatCompletionMessageToolCall]] | None:  # pylint: disable=too-many-branches
         """Stream a chat completion from the LLM and collect the result.
 
         Prints tokens to stdout as they arrive. Handles mid-stream
@@ -218,12 +202,12 @@ class Orchestrator:
             stream = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[{"role": "system", "content": SYSTEM_PROMPT}, *self._history],
-                tools=TOOL_DEFINITIONS,  # type: ignore[arg-type]
+                tools=tools.TOOL_DEFINITIONS,  # type: ignore[arg-type]
                 stream=True,
             )
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("LLM stream creation failed: %s", exc, exc_info=True)
-            print_error(f"LLM error: {exc}")
+            display.print_error(f"LLM error: {exc}")
             return None
 
         content = ""
@@ -236,10 +220,10 @@ class Orchestrator:
                     logger.info("Stream cancelled by user (content so far: %d chars)", len(content))
                     await stream.close()
                     if content:
-                        finish_streaming()
-                        print_dim("[cancelled]")
+                        display.finish_streaming()
+                        display.print_dim("[cancelled]")
                     else:
-                        print_dim("\n[cancelled]")
+                        display.print_dim("\n[cancelled]")
                     # Return partial content so it can be saved to history
                     return content, []
 
@@ -249,10 +233,10 @@ class Orchestrator:
 
                 if delta.content:
                     if not header_printed:
-                        print_assistant_header()
+                        display.print_assistant_header()
                         header_printed = True
                     content += delta.content
-                    print_streaming_token(delta.content)
+                    display.print_streaming_token(delta.content)
 
                 if delta.tool_calls:
                     for tc_delta in delta.tool_calls:
@@ -270,20 +254,24 @@ class Orchestrator:
 
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Stream error: %s", exc, exc_info=True)
-            print_error(f"\nStream error: {exc}")
+            display.print_error(f"\nStream error: {exc}")
             return None
 
         logger.debug("Stream completed: %d chars content, %d tool calls", len(content), len(tool_calls_by_index))
 
         tool_calls = [
-            ChatCompletionMessageToolCall(
-                id=tc["id"], type="function", function=Function(name=tc["name"], arguments=tc["arguments"])
+            tc_mod.ChatCompletionMessageToolCall(
+                id=tc["id"],
+                type="function",
+                function=tc_mod.Function(name=tc["name"], arguments=tc["arguments"]),
             )
             for tc in tool_calls_by_index.values()
         ]
         return content, tool_calls
 
-    async def _execute_tools(self, tool_calls: list[ChatCompletionMessageToolCall]) -> list[ToolResult] | None:
+    async def _execute_tools(
+        self, tool_calls: list[tc_mod.ChatCompletionMessageToolCall]
+    ) -> list[models.ToolResult] | None:
         """Execute a list of tool calls sequentially with cancellation checks.
 
         Args:
@@ -293,37 +281,39 @@ class Orchestrator:
             List of ``ToolResult`` objects, or ``None`` if cancelled
             before all tools complete.
         """
-        results: list[ToolResult] = []
+        results: list[models.ToolResult] = []
         for tc in tool_calls:
             if self._cancel_event.is_set():
                 logger.info("Tool execution cancelled before %s", tc.function.name)
-                print_dim("[cancelled]")
+                display.print_dim("[cancelled]")
                 return None
 
             args = {}
             with contextlib.suppress(json.JSONDecodeError):
                 args = json.loads(tc.function.arguments)
 
-            print_tool_call(tc.function.name, args)
-            with tool_spinner(tc.function.name, args):
+            display.print_tool_call(tc.function.name, args)
+            with display.tool_spinner(tc.function.name, args):
                 result = await self._tools.execute(tc, self._cancel_event)
 
             if result.error:
-                print_tool_result_error(tc.function.name, result.content)
+                display.print_tool_result_error(tc.function.name, result.content)
             else:
-                print_tool_result_ok(tc.function.name)
+                display.print_tool_result_ok(tc.function.name)
             results.append(result)
 
         return results
 
-    def _append_assistant_message(self, content: str, tool_calls: list[ChatCompletionMessageToolCall]) -> None:
+    def _append_assistant_message(
+        self, content: str, tool_calls: list[tc_mod.ChatCompletionMessageToolCall]
+    ) -> None:
         """Append an assistant message to the conversation history.
 
         Args:
             content: The assistant's text response (may be empty).
             tool_calls: Tool calls the assistant requested (may be empty).
         """
-        msg = ChatCompletionAssistantMessageParam(role="assistant")
+        msg = openai_chat.ChatCompletionAssistantMessageParam(role="assistant")
         if content:
             msg["content"] = content
         if tool_calls:

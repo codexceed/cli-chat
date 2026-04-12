@@ -59,6 +59,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "pylint" },
+    { name = "pylint-google-style-guide-imports-enforcing" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -79,6 +80,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "pylint", specifier = ">=3.3.0" },
+    { name = "pylint-google-style-guide-imports-enforcing", specifier = ">=1.3.1" },
     { name = "pyright", specifier = ">=1.1.390" },
     { name = "pytest", specifier = ">=8.3.0" },
     { name = "pytest-asyncio", specifier = ">=0.24.0" },
@@ -459,6 +461,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/e4/b6/74d9a8a68b8067efc
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d5/6f/9ac2548e290764781f9e7e2aaf0685b086379dabfb29ca38536985471eaf/pylint-4.0.5-py3-none-any.whl", hash = "sha256:00f51c9b14a3b3ae08cff6b2cdd43f28165c78b165b628692e428fb1f8dc2cf2", size = 536694, upload-time = "2026-02-20T09:07:31.028Z" },
 ]
+
+[[package]]
+name = "pylint-google-style-guide-imports-enforcing"
+version = "1.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/34/e1/e517b53167e8824f51a359911c401c340806f9e80ca9c63867681fba7133/pylint_google_style_guide_imports_enforcing-1.3.1.tar.gz", hash = "sha256:e3cbd57037f088a3af0107f3407301c6d07ef88e8871be9e512e850a67ac5291", size = 3575, upload-time = "2025-04-09T18:12:57.718Z" }
 
 [[package]]
 name = "pyright"

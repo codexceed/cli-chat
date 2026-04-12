@@ -8,9 +8,7 @@ import logging
 import signal
 import uuid
 
-from cli_chat.display import console, print_dim
-from cli_chat.models import Settings
-from cli_chat.orchestrator import Orchestrator
+from cli_chat import display, models, orchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -40,22 +38,22 @@ def _configure_logging() -> str:
 
 async def _run() -> None:
     """Initialize settings, logging, and signal handling, then start the orchestrator."""
-    settings = Settings()  # type: ignore[call-arg]
+    settings = models.Settings()  # type: ignore[call-arg]
     log_file = _configure_logging()
     logger.info("Session started (model=%s, log_file=%s)", settings.llm_model, log_file)
 
-    orch = Orchestrator(settings)
+    orch = orchestrator.Orchestrator(settings)
     loop = asyncio.get_running_loop()
     loop.add_signal_handler(signal.SIGINT, orch.handle_interrupt)
 
-    console.print("[bold]CLI Chat[/bold] — type 'exit' to quit, Ctrl+C to cancel\n")
+    display.console.print("[bold]CLI Chat[/bold] — type 'exit' to quit, Ctrl+C to cancel\n")
 
     try:
         await orch.run()
     finally:
         loop.remove_signal_handler(signal.SIGINT)
         await orch.close()
-        print_dim("\nGoodbye!")
+        display.print_dim("\nGoodbye!")
         logger.info("Session ended")
 
 

@@ -2,27 +2,27 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings
+import pydantic
+import pydantic_settings
 
 
-class Settings(BaseSettings):
+class Settings(pydantic_settings.BaseSettings):
     model_config = {"env_file": ".env", "extra": "ignore"}
 
-    llm_api_key: str = Field(alias="LLM_API_KEY")
-    llm_base_url: str = Field(default="https://openrouter.ai/api/v1", alias="LLM_BASE_URL")
-    llm_model: str = Field(default="openai/gpt-4o-mini", alias="LLM_MODEL")
-    elyos_api_key: str = Field(alias="ELYOS_API_KEY")
+    llm_api_key: str = pydantic.Field(alias="LLM_API_KEY")
+    llm_base_url: str = pydantic.Field(default="https://openrouter.ai/api/v1", alias="LLM_BASE_URL")
+    llm_model: str = pydantic.Field(default="openai/gpt-4o-mini", alias="LLM_MODEL")
+    elyos_api_key: str = pydantic.Field(alias="ELYOS_API_KEY")
     elyos_base_url: str = "https://elyos-interview-907656039105.europe-west2.run.app"
 
 
-class WeatherCondition(BaseModel):
+class WeatherCondition(pydantic.BaseModel):
     temperature_c: float
     condition: str
     humidity: float
 
 
-class WeatherResponse(BaseModel):
+class WeatherResponse(pydantic.BaseModel):
     """Normalized weather response — always uses a list of conditions."""
 
     location: str
@@ -69,7 +69,7 @@ class WeatherResponse(BaseModel):
         return "\n".join(parts)
 
 
-class ResearchResponse(BaseModel):
+class ResearchResponse(pydantic.BaseModel):
     topic: str
     summary: str
     sources: list[str] = []
@@ -94,14 +94,14 @@ class ResearchResponse(BaseModel):
         return "\n".join(parts)
 
 
-class ThrottledResponse(BaseModel):
+class ThrottledResponse(pydantic.BaseModel):
     status: str  # "throttled"
     message: str
     retry_after_seconds: int
     data: None = None
 
 
-class ToolResult(BaseModel):
+class ToolResult(pydantic.BaseModel):
     tool_call_id: str
     name: str
     content: str
