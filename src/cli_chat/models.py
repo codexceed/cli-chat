@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 class WeatherCondition(BaseModel):
     temperature_c: float
     condition: str
-    humidity: int | float
+    humidity: float
 
 
 class WeatherResponse(BaseModel):
