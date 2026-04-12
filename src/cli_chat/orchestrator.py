@@ -17,8 +17,8 @@ from rich.spinner import Spinner
 from cli_chat.tools import TOOL_DEFINITIONS, ToolExecutor
 
 SYSTEM_PROMPT = "You are a helpful assistant. Be concise and helpful."
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-ELYOS_BASE_URL = "https://elyos-interview-907656039105.europe-west2.run.app"
+DEFAULT_LLM_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_ELYOS_BASE_URL = "https://elyos-interview-907656039105.europe-west2.run.app"
 DEFAULT_MODEL = "openai/gpt-4o-mini"
 logger = logging.getLogger(__name__)
 
@@ -37,12 +37,13 @@ def _configure_logging() -> str:
         logging.getLogger(noisy).setLevel(logging.WARNING)
     return log_file
 
-def _load_config() -> tuple[str, str, str, str]:
+def _load_config() -> tuple[str, str, str, str, str]:
     return (
-        os.environ["OPENROUTER_API_KEY"],
-        os.environ["ELYOS_API_KEY"],
+        os.environ["LLM_API_KEY"],
+        os.getenv("LLM_BASE_URL", DEFAULT_LLM_BASE_URL),
         os.getenv("LLM_MODEL", DEFAULT_MODEL),
-        os.getenv("ELYOS_BASE_URL", ELYOS_BASE_URL),
+        os.environ["ELYOS_API_KEY"],
+        os.getenv("ELYOS_BASE_URL", DEFAULT_ELYOS_BASE_URL),
     )
 
 async def _read_input(cancel_event: asyncio.Event) -> str | None:
@@ -199,9 +200,9 @@ async def _process_turn(  # pylint: disable=too-many-arguments,too-many-position
             )
 
 async def run_chat() -> None:
-    openrouter_api_key, elyos_api_key, model, elyos_base_url = _load_config()
+    llm_api_key, llm_base_url, model, elyos_api_key, elyos_base_url = _load_config()
     log_file = _configure_logging()
-    client = AsyncOpenAI(api_key=openrouter_api_key, base_url=OPENROUTER_BASE_URL)
+    client = AsyncOpenAI(api_key=llm_api_key, base_url=llm_base_url)
     tools = ToolExecutor(elyos_base_url, elyos_api_key)
     history: list[dict] = []
     cancel_event = asyncio.Event()

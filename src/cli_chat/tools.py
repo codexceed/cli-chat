@@ -117,6 +117,9 @@ class ToolExecutor:
 
     async def _research_topic(self, topic: str, cancel_event: asyncio.Event) -> str:
         data = await self._request_with_retry("Research", "/research", {"topic": topic}, cancel_event)
+        if not data or "topic" not in data or not data.get("summary"):
+            logger.warning("Research returned empty/incomplete response: %s", data)
+            return f"Research for '{topic}' returned no results."
         return _format_research(data)
 
     async def _request_with_retry(

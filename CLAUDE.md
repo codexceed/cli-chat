@@ -8,13 +8,13 @@ Take-home interview project: CLI chat app with streaming LLM + tool calling agai
 
 - `make install` → `make run` to use
 - `make check` runs lint + test (20 e2e tests)
-- API keys in `.env` (OPENROUTER_API_KEY, ELYOS_API_KEY, optional LLM_MODEL)
+- API keys in `.env` (LLM_API_KEY, ELYOS_API_KEY; optional LLM_BASE_URL, LLM_MODEL)
 - Logs: `cli_chat_<timestamp>_<uuid>.log` per session
 - Design docs: README.md, ARCHITECTURE.md, DISCOVERIES.md
 
 ## Key decisions
 
-- OpenRouter (OpenAI-compatible) for LLM, model configurable via LLM_MODEL in .env
+- Any OpenAI-compatible endpoint for LLM, configurable via LLM_BASE_URL and LLM_MODEL in .env
 - httpx async for external API calls, with `asyncio.wait` racing requests against cancel events
 - Plain dicts for API responses, formatted by `_format_weather` / `_format_research` helpers
 - Simple retry loop for throttle handling (reads `retry_after_seconds`, max 3 attempts)

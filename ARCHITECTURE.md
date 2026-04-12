@@ -8,7 +8,7 @@ The application is structured as two modules: `orchestrator.py` handles the conv
 graph TD
     A[orchestrator.py] -->|entry point, turn loop, streaming| B[AsyncOpenAI]
     A -->|dispatches tool calls| C[ToolExecutor]
-    B -->|OpenAI SDK| D[OpenRouter API]
+    B -->|OpenAI SDK| D[LLM API]
     C -->|httpx async + retry loop| E[Elyos Weather API]
     C -->|httpx async + retry loop| F[Elyos Research API]
 ```
