@@ -41,11 +41,16 @@ sequenceDiagram
         O->>D: print_streaming_token()
     end
     alt tool calls detected
-        O->>D: print_tool_call()
-        O->>D: tool_spinner()
-        O->>T: execute(tool_call, cancel_event)
-        T-->>O: ToolResult
-        O->>D: print_tool_result_ok/error()
+        O->>D: print_tool_call() (per call)
+        O->>D: tool_spinner(calls)
+        O->>T: execute_batch(tool_calls, cancel_event)
+        par concurrent tool calls
+            T->>T: execute(call_1)
+        and
+            T->>T: execute(call_N)
+        end
+        T-->>O: list[ToolResult]
+        O->>D: print_tool_result_ok/error() (per result)
         O->>L: stream(history + tool results)
         loop streaming final response
             O->>D: print_assistant_header()
@@ -80,7 +85,10 @@ The cancel event is cleared at the start of each new turn.
 
 ### Post-cancellation history consistency
 
-When tool calls are cancelled, stub `[cancelled by user]` tool messages are added to the history for every pending tool call. This prevents the LLM from rejecting the next request due to missing tool responses (the OpenAI API requires every `tool_call_id` to have a matching tool message).
+The OpenAI API requires every `tool_call_id` to have a matching tool message, so the orchestrator always leaves the history valid after a cancel. There are two paths:
+
+- **Pre-batch cancel** (Ctrl+C fires before `execute_batch` starts): the orchestrator appends a stub `[cancelled by user]` tool message for every requested tool call.
+- **Mid-batch cancel** (Ctrl+C fires while calls are in flight): `execute_batch` awaits all tasks; each in-flight `execute()` catches `asyncio.CancelledError` and returns a `ToolResult` with content `"Tool call was cancelled by the user."`. Completed results are preserved, and the orchestrator appends the full list before breaking out of the turn loop so no wasted follow-up LLM stream is issued.
 
 ### Why `add_reader` instead of `asyncio.to_thread(input)`?
 
@@ -144,5 +152,6 @@ flowchart LR
 3. **Pydantic normalization** — `WeatherResponse.from_api()` handles the non-deterministic API schemas at the boundary, so downstream code always sees a consistent model.
 4. **Tenacity for retry** — `@_throttle_retry` decorator with custom wait strategy reading `retry_after_seconds` from the API response. Keeps method bodies clean.
 5. **Content-type guard** — `_request()` checks for `application/json` before parsing, handling infrastructure-level HTML errors (e.g., unicode input → Cloud Run 400).
-6. **History integrity on cancel** — stub tool results ensure the conversation history is always valid, preventing LLM 400 errors after interrupted tool calls.
-7. **File-only logging** — comprehensive DEBUG-level logs to timestamped session files, with third-party loggers silenced to WARNING. No console noise.
+6. **History integrity on cancel** — pre-batch cancels stub every pending call; mid-batch cancels preserve completed results and use cancelled `ToolResult`s for the rest. Either way the conversation history stays valid, preventing LLM 400 errors after interrupted tool calls.
+7. **Concurrent tool execution** — `_execute_tools` dispatches the full batch via `ToolExecutor.execute_batch` (`asyncio.gather`) under a single consolidated spinner, so multi-call turns run in ~max(durations) instead of sum(durations).
+8. **File-only logging** — comprehensive DEBUG-level logs to timestamped session files, with third-party loggers silenced to WARNING. No console noise.
