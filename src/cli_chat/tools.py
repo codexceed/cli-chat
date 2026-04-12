@@ -40,6 +40,7 @@ REQUEST_TIMEOUT = 15.0
 MAX_RETRIES = 3
 MAX_THROTTLE_WAIT = 15
 
+
 def _format_weather(data: dict) -> str:
     conditions = data.get("conditions")
     if not conditions:
@@ -69,6 +70,11 @@ def _format_research(data: dict) -> str:
         parts.append(f"Note: cached result ({days_old} days old)")
     return "\n".join(parts)
 
+
+def _tool_result(tool_call_id: str, content: str, error: bool = False) -> dict:
+    return {"tool_call_id": tool_call_id, "content": content, "error": error}
+
+
 class ToolExecutor:
     def __init__(self, base_url: str, api_key: str) -> None:
         self._client = httpx.AsyncClient(
@@ -80,36 +86,39 @@ class ToolExecutor:
     async def close(self) -> None:
         await self._client.aclose()
 
+    async def _execute_named_tool(self, name: str, args: dict, cancel_event: asyncio.Event) -> str:
+        if name == "get_weather":
+            return await self._get_weather(args.get("location", ""), cancel_event)
+        if name == "research_topic":
+            return await self._research_topic(args.get("topic", ""), cancel_event)
+        logger.warning("Unknown tool requested: %s", name)
+        return f"Unknown tool: {name}"
+
     async def execute(self, tool_call: dict, cancel_event: asyncio.Event) -> dict:
+        tool_call_id = tool_call["id"]
         name = tool_call["function"]["name"]
         try:
             args = json.loads(tool_call["function"]["arguments"] or "{}")
         except json.JSONDecodeError:
             logger.error("Invalid JSON arguments for tool %s: %s", name, tool_call["function"]["arguments"])
-            return {"tool_call_id": tool_call["id"], "content": "Error: invalid tool arguments", "error": True}
+            return _tool_result(tool_call_id, "Error: invalid tool arguments", error=True)
 
         logger.info("Tool call: %s(%s)", name, args)
         try:
-            if name == "get_weather":
-                content = await self._get_weather(args.get("location", ""), cancel_event)
-            elif name == "research_topic":
-                content = await self._research_topic(args.get("topic", ""), cancel_event)
-            else:
-                logger.warning("Unknown tool requested: %s", name)
-                content = f"Unknown tool: {name}"
+            content = await self._execute_named_tool(name, args, cancel_event)
             logger.info("Tool %s completed", name)
             logger.debug("Tool %s result: %s", name, content[:200])
-            return {"tool_call_id": tool_call["id"], "content": content, "error": False}
+            return _tool_result(tool_call_id, content)
         except asyncio.CancelledError:
             logger.warning("Tool %s cancelled by user", name)
-            return {"tool_call_id": tool_call["id"], "content": "Tool call was cancelled by the user.", "error": True}
+            return _tool_result(tool_call_id, "Tool call was cancelled by the user.", error=True)
         except httpx.HTTPStatusError as exc:
             logger.error("Tool %s HTTP error %d: %s", name, exc.response.status_code, exc.response.text[:200])
             msg = f"API error ({exc.response.status_code}): {exc.response.text}"
-            return {"tool_call_id": tool_call["id"], "content": msg, "error": True}
+            return _tool_result(tool_call_id, msg, error=True)
         except (httpx.RequestError, httpx.TimeoutException, httpx.DecodingError, RuntimeError) as exc:
             logger.error("Tool %s request failed: %s", name, exc)
-            return {"tool_call_id": tool_call["id"], "content": f"Request failed: {exc}", "error": True}
+            return _tool_result(tool_call_id, f"Request failed: {exc}", error=True)
 
     async def _get_weather(self, location: str, cancel_event: asyncio.Event) -> str:
         data = await self._request_with_retry("Weather", "/weather", {"location": location}, cancel_event)
@@ -139,8 +148,8 @@ class ToolExecutor:
             logger.warning("%s throttled (attempt %d/%d), retry in %ds", label, attempt + 1, MAX_RETRIES, retry_after)
             if attempt < MAX_RETRIES - 1:
                 await _wait_or_cancel(retry_after, cancel_event)
-
         raise RuntimeError(f"{label} API is rate-limited. Please try again in {retry_after}s.")
+
     async def _request(self, path: str, params: dict, cancel_event: asyncio.Event) -> dict:
         if cancel_event.is_set():
             raise asyncio.CancelledError
@@ -153,11 +162,12 @@ class ToolExecutor:
         content_type = response.headers.get("content-type", "")
         if "json" not in content_type:
             raise httpx.DecodingError(f"Unexpected response format (got {content_type})")
-
         return response.json()
+
 
 async def _wait_or_cancel(delay: float, cancel_event: asyncio.Event) -> None:
     await _race_with_cancel(asyncio.sleep(delay), cancel_event)
+
 
 async def _race_with_cancel(awaitable, cancel_event: asyncio.Event):
     work_task = asyncio.create_task(awaitable)

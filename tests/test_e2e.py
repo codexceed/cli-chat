@@ -10,12 +10,7 @@ import pytest
 from cli_chat import tools as tools_module
 from cli_chat.tools import _format_research, _format_weather
 
-# ── Fixtures ──────────────────────────────────────────────────────────────────
-
-ELYOS_BASE_URL = os.getenv(
-    "ELYOS_BASE_URL", "https://elyos-interview-907656039105.europe-west2.run.app"
-)
-
+ELYOS_BASE_URL = os.getenv("ELYOS_BASE_URL", "https://elyos-interview-907656039105.europe-west2.run.app")
 
 @pytest.fixture
 def executor() -> tools_module.ToolExecutor:
@@ -40,10 +35,6 @@ def _research_call(topic: str) -> dict:
 
 def _no_cancel() -> asyncio.Event:
     return asyncio.Event()
-
-
-# ── Weather API tests ─────────────────────────────────────────────────────────
-
 
 class TestWeatherAPI:
     @pytest.mark.asyncio
@@ -91,10 +82,6 @@ class TestWeatherAPI:
             assert "Berlin" in r["content"]
             assert "°C" in r["content"]
 
-
-# ── Research API tests ────────────────────────────────────────────────────────
-
-
 class TestResearchAPI:
     @pytest.mark.asyncio
     async def test_returns_summary(self, executor: tools_module.ToolExecutor) -> None:
@@ -114,10 +101,6 @@ class TestResearchAPI:
         """API accepts empty topic without error — we should handle it."""
         result = await executor.execute(_research_call(""), _no_cancel())
         assert result["content"]
-
-
-# ── Cancellation tests ────────────────────────────────────────────────────────
-
 
 class TestCancellation:
     @pytest.mark.asyncio
@@ -151,10 +134,6 @@ class TestCancellation:
         result, _ = await asyncio.gather(execute(), cancel_after_delay())
         assert result["content"]
 
-
-# ── Error handling tests ──────────────────────────────────────────────────────
-
-
 class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_invalid_json_arguments(self, executor: tools_module.ToolExecutor) -> None:
@@ -180,10 +159,6 @@ class TestErrorHandling:
         """Special characters shouldn't cause crashes."""
         result = await executor.execute(_weather_call("London'; DROP TABLE --"), _no_cancel())
         assert result["content"]
-
-
-# ── Formatting tests ─────────────────────────────────────────────────────────
-
 
 class TestFormatting:
     def test_flat_weather_formatted(self) -> None:

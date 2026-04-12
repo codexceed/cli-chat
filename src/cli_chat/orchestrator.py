@@ -36,7 +36,6 @@ def _configure_logging() -> str:
     for noisy in ("httpx", "openai", "httpcore"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     return log_file
-
 def _load_config() -> tuple[str, str, str, str, str]:
     return (
         os.environ["LLM_API_KEY"],
@@ -69,6 +68,21 @@ async def _read_input(cancel_event: asyncio.Event) -> str | None:
         return None
     line = line_future.result()
     return line.rstrip("\n") if line else None
+
+
+def _merge_tool_call_delta(tool_calls_by_index: dict[int, dict], tc_delta) -> None:
+    entry = tool_calls_by_index.setdefault(
+        tc_delta.index,
+        {"id": tc_delta.id or "", "type": "function", "function": {"name": "", "arguments": ""}},
+    )
+    if tc_delta.id:
+        entry["id"] = tc_delta.id
+    if not tc_delta.function:
+        return
+    if tc_delta.function.name:
+        entry["function"]["name"] = tc_delta.function.name
+    if tc_delta.function.arguments:
+        entry["function"]["arguments"] += tc_delta.function.arguments
 
 async def _stream_response(  # pylint: disable=too-many-branches
     client: AsyncOpenAI,
@@ -109,27 +123,16 @@ async def _stream_response(  # pylint: disable=too-many-branches
                 content += delta.content
                 sys.stdout.write(delta.content)
                 sys.stdout.flush()
-
             if delta.tool_calls:
                 for tc_delta in delta.tool_calls:
-                    index = tc_delta.index
-                    entry = tool_calls_by_index.setdefault(
-                        index,
-                        {"id": tc_delta.id or "", "type": "function", "function": {"name": "", "arguments": ""}},
-                    )
-                    if tc_delta.id:
-                        entry["id"] = tc_delta.id
-                    if tc_delta.function:
-                        if tc_delta.function.name:
-                            entry["function"]["name"] = tc_delta.function.name
-                        if tc_delta.function.arguments:
-                            entry["function"]["arguments"] += tc_delta.function.arguments
+                    _merge_tool_call_delta(tool_calls_by_index, tc_delta)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("Stream error: %s", exc, exc_info=True)
         print(f"\nError: Stream error: {exc}", file=sys.stderr)
         return None
     logger.debug("Stream completed: %d chars content, %d tool calls", len(content), len(tool_calls_by_index))
     return content, list(tool_calls_by_index.values())
+
 
 async def _execute_tools(
     tools: ToolExecutor,
@@ -192,15 +195,11 @@ async def _process_turn(  # pylint: disable=too-many-arguments,too-many-position
             return
         tool_results = await _execute_tools(tools, tool_calls, cancel_event)
         if tool_results is None:
-            for tool_call in tool_calls:
-                history.append(
-                    {"role": "tool", "tool_call_id": tool_call["id"], "content": "[cancelled by user]"}
-                )
+            for tc in tool_calls:
+                history.append({"role": "tool", "tool_call_id": tc["id"], "content": "[cancelled by user]"})
             return
-        for result in tool_results:
-            history.append(
-                {"role": "tool", "tool_call_id": result["tool_call_id"], "content": result["content"]}
-            )
+        for r in tool_results:
+            history.append({"role": "tool", "tool_call_id": r["tool_call_id"], "content": r["content"]})
 
 async def run_chat() -> None:
     llm_api_key, llm_base_url, model, elyos_api_key, elyos_base_url = _load_config()
@@ -210,6 +209,7 @@ async def run_chat() -> None:
     history: list[dict] = []
     cancel_event = asyncio.Event()
     state = {"should_exit": False}
+
     def _handle_interrupt() -> None:
         if cancel_event.is_set():
             state["should_exit"] = True
@@ -237,8 +237,10 @@ async def run_chat() -> None:
         print("\nGoodbye!")
         logger.info("Session ended")
 
+
 def main() -> None:
     asyncio.run(run_chat())
+
 
 if __name__ == "__main__":
     main()
