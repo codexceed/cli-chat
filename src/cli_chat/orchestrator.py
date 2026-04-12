@@ -166,10 +166,13 @@ async def _process_turn(  # pylint: disable=too-many-arguments,too-many-position
     cancel_event: asyncio.Event,
 ) -> None:
     logger.info("User input: %s", user_input)
+    rollback_point = len(history)
     history.append({"role": "user", "content": user_input})
     while True:
         result = await _stream_response(client, model, history, cancel_event)
         if result is None:
+            logger.info("Rolling back turn (%d entries) after stream failure", len(history) - rollback_point)
+            del history[rollback_point:]
             return
         content, tool_calls = result
         if cancel_event.is_set():

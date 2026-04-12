@@ -40,7 +40,7 @@ The API returns two different response shapes **randomly for the same city**. Co
 }
 ```
 
-**Handling:** `WeatherResponse.from_api()` detects the shape and normalizes both into a consistent `conditions` list.
+**Handling:** `_format_weather` detects the shape — the flat case is wrapped into a single-element `conditions` list before rendering, so both shapes render identically.
 
 #### 2. Weather Also Rate-Limits (HTTP 200)
 
@@ -371,9 +371,9 @@ Two distinct behaviors:
 
 Some inputs (observed with whitespace-only `"   "` and XSS payloads) **occasionally return an empty `{}`** with HTTP 200. This is non-deterministic — the same input returns a normal response most of the time, but rarely returns `{}`.
 
-**Impact:** Without a guard, `ResearchResponse(**{})` raises a Pydantic `ValidationError` (missing required `topic` and `summary`).
+**Impact:** Formatting an empty dict would raise a `KeyError` on `summary`.
 
-**Handling:** `_research_topic()` checks for empty or incomplete responses (missing `topic` or empty `summary`) before Pydantic parsing, returning a graceful "no results" message instead of crashing.
+**Handling:** `_research_topic` checks for missing `topic` or empty `summary` before calling `_format_research`, returning a graceful "no results" message instead of crashing.
 
 #### 6. Standard Error Responses
 - `422` for missing `topic` param
@@ -423,13 +423,13 @@ Both endpoints share a single rate limit pool. Behavior:
 
 **Root cause:** The cancel event was only checked before and after the HTTP request, not during it. The httpx `await` held the coroutine for the full request duration.
 
-**Fix:** Added `_cancellable_request()` which races the httpx coroutine against `cancel_event.wait()` via `asyncio.wait(FIRST_COMPLETED)`. When Ctrl+C fires, the HTTP request task is immediately cancelled and the connection closed. Same pattern used by `_read_input` and `_cancellable_sleep`.
+**Fix:** Added `_race_with_cancel`, which races any awaitable against `cancel_event.wait()` via `asyncio.wait(FIRST_COMPLETED)`. `_request` routes the httpx coroutine through it, so when Ctrl+C fires the HTTP request task is immediately cancelled and the connection closed. The same helper backs `_wait_or_cancel` for throttle-retry sleeps, and `_read_input` uses the equivalent `add_reader` + `asyncio.wait` pattern.
 
 ### 3. Rate-Limited Results Not Marked as Errors (Fixed)
 
-**Problem:** When the weather or research API returned a throttled response and retries were exhausted, the rate-limit message was returned as a successful `ToolResult(error=False)`. The LLM treated it as a valid tool response, and the user saw no error indication.
+**Problem:** When the weather or research API returned a throttled response and retries were exhausted, the rate-limit message was returned as a successful tool result (`error=False`). The LLM treated it as a valid tool response, and the user saw no error indication.
 
-**Fix:** Introduced `_RateLimitError` exception. Exhausted throttle retries now raise this exception, which is caught by `execute()` and returned as `ToolResult(error=True)`.
+**Fix:** `_request_with_retry` now raises `RuntimeError` when throttle retries are exhausted. `execute()` catches it alongside the other `httpx`/request failures and returns the tool result dict with `error=True`.
 
 ### 4. Unresponsive Exit After Goodbye (Fixed)
 
