@@ -171,7 +171,7 @@ class Orchestrator:
 
             tool_results = await self._execute_tools(tool_calls)
             if tool_results is None:
-                # Cancelled: add stub tool results so history stays valid for the LLM
+                # Pre-cancelled: add stub tool results so history stays valid for the LLM
                 for tc in tool_calls:
                     self._history.append(
                         openai_chat.ChatCompletionToolMessageParam(
@@ -186,6 +186,12 @@ class Orchestrator:
                         role="tool", tool_call_id=tr.tool_call_id, content=tr.content
                     )
                 )
+
+            # Cancelled mid-batch: results (including any cancelled stubs) are
+            # already in history, so break instead of looping into another LLM call.
+            if self._cancel_event.is_set():
+                logger.info("Turn %d: cancelled during tool batch, stopping turn", self._turn_count)
+                break
 
     async def _stream_response(self) -> tuple[str, list[tc_mod.ChatCompletionMessageToolCall]] | None:  # pylint: disable=too-many-branches
         """Stream a chat completion from the LLM and collect the result.
@@ -202,7 +208,7 @@ class Orchestrator:
             stream = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[{"role": "system", "content": SYSTEM_PROMPT}, *self._history],
-                tools=tools.TOOL_DEFINITIONS,  # type: ignore[arg-type]
+                tools=tools.TOOL_DEFINITIONS,
                 stream=True,
             )
         except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -272,35 +278,37 @@ class Orchestrator:
     async def _execute_tools(
         self, tool_calls: list[tc_mod.ChatCompletionMessageToolCall]
     ) -> list[models.ToolResult] | None:
-        """Execute a list of tool calls sequentially with cancellation checks.
+        """Execute tool calls concurrently under a single consolidated spinner.
 
         Args:
             tool_calls: Tool calls requested by the LLM.
 
         Returns:
-            List of ``ToolResult`` objects, or ``None`` if cancelled
-            before all tools complete.
+            List of ``ToolResult`` objects (including any cancelled stubs
+            produced mid-batch), or ``None`` if cancelled before the
+            batch starts.
         """
-        results: list[models.ToolResult] = []
-        for tc in tool_calls:
-            if self._cancel_event.is_set():
-                logger.info("Tool execution cancelled before %s", tc.function.name)
-                display.print_dim("[cancelled]")
-                return None
+        if self._cancel_event.is_set():
+            logger.info("Tool execution cancelled before batch of %d call(s)", len(tool_calls))
+            display.print_dim("[cancelled]")
+            return None
 
-            args = {}
+        parsed: list[tuple[str, dict]] = []
+        for tc in tool_calls:
+            args: dict = {}
             with contextlib.suppress(json.JSONDecodeError):
                 args = json.loads(tc.function.arguments)
-
+            parsed.append((tc.function.name, args))
             display.print_tool_call(tc.function.name, args)
-            with display.tool_spinner(tc.function.name, args):
-                result = await self._tools.execute(tc, self._cancel_event)
 
+        with display.tool_spinner(parsed):
+            results = await self._tools.execute_batch(tool_calls, self._cancel_event)
+
+        for tc, result in zip(tool_calls, results, strict=True):
             if result.error:
                 display.print_tool_result_error(tc.function.name, result.content)
             else:
                 display.print_tool_result_ok(tc.function.name)
-            results.append(result)
 
         return results
 

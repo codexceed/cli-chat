@@ -76,24 +76,33 @@ def print_tool_call(tool_name: str, args: dict) -> None:
     console.print(f"  [tool]⚡ [tool.name]{tool_name}[/tool.name]({detail})[/tool]")
 
 
-def tool_spinner(tool_name: str, args: dict) -> Live:
-    """Create a transient Rich Live spinner for the duration of a tool call.
+def _single_call_label(tool_name: str, args: dict) -> str:
+    """Build a descriptive spinner label for a single tool call."""
+    if tool_name == "get_weather":
+        return f"Getting weather for {args.get('location', '?')}..."
+    if tool_name == "research_topic":
+        return f"Researching {args.get('topic', '?')}... (Ctrl+C to cancel)"
+    return f"Running {tool_name}..."
+
+
+def tool_spinner(calls: list[tuple[str, dict]]) -> Live:
+    """Create a transient Rich Live spinner covering one or more concurrent calls.
 
     Intended to be used as a context manager (``with tool_spinner(...)``).
+    With a single call the label is descriptive; with multiple, it lists
+    the tools running in parallel.
 
     Args:
-        tool_name: Name of the tool being executed.
-        args: Parsed arguments passed to the tool, used to build the label.
+        calls: Sequence of ``(tool_name, args)`` pairs for the in-flight calls.
 
     Returns:
         A ``rich.live.Live`` instance wrapping a dots spinner.
     """
-    if tool_name == "get_weather":
-        label = f"Getting weather for {args.get('location', '?')}..."
-    elif tool_name == "research_topic":
-        label = f"Researching {args.get('topic', '?')}... (Ctrl+C to cancel)"
+    if len(calls) == 1:
+        label = _single_call_label(*calls[0])
     else:
-        label = f"Running {tool_name}..."
+        names = ", ".join(name for name, _ in calls)
+        label = f"Running {len(calls)} tools in parallel ({names})... (Ctrl+C to cancel)"
     spinner = Spinner("dots", text=f"[tool]{label}[/tool]")
     return Live(spinner, console=console, transient=True)
 
