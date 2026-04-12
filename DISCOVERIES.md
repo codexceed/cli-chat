@@ -40,7 +40,7 @@ The API returns two different response shapes **randomly for the same city**. Co
 }
 ```
 
-**Handling:** `WeatherResponse.from_api()` detects the shape and normalizes both into a consistent `conditions` list.
+**Handling:** `_format_weather` detects the shape — the flat case is wrapped into a single-element `conditions` list before rendering, so both shapes render identically.
 
 #### 2. Weather Also Rate-Limits (HTTP 200)
 
@@ -371,9 +371,9 @@ Two distinct behaviors:
 
 Some inputs (observed with whitespace-only `"   "` and XSS payloads) **occasionally return an empty `{}`** with HTTP 200. This is non-deterministic — the same input returns a normal response most of the time, but rarely returns `{}`.
 
-**Impact:** Without a guard, `ResearchResponse(**{})` raises a Pydantic `ValidationError` (missing required `topic` and `summary`).
+**Impact:** Formatting an empty dict would raise a `KeyError` on `summary`.
 
-**Handling:** `_research_topic()` checks for empty or incomplete responses (missing `topic` or empty `summary`) before Pydantic parsing, returning a graceful "no results" message instead of crashing.
+**Handling:** `_research_topic` checks for missing `topic` or empty `summary` before calling `_format_research`, returning a graceful "no results" message instead of crashing.
 
 #### 6. Standard Error Responses
 - `422` for missing `topic` param

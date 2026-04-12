@@ -5,7 +5,6 @@ A command-line chat application with streaming LLM responses and tool calling. B
 ## Requirements
 
 - Python 3.12+
-- [uv](https://docs.astral.sh/uv/)
 - API keys in `.env`:
   ```
   LLM_API_KEY=sk-...
@@ -15,14 +14,30 @@ A command-line chat application with streaming LLM responses and tool calling. B
 
 ## Setup
 
+### With uv (recommended)
+
 ```bash
-make install
+make install   # runs uv sync
+make run       # runs uv run cli-chat
+```
+
+### Without uv (bare Python)
+
+```bash
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install .
 ```
 
 ## Usage
 
 ```bash
+# With uv
 make run
+
+# Without uv
+source .venv/bin/activate
+cli-chat
 ```
 
 **Example session:**
@@ -58,7 +73,7 @@ make check      # lint + test (CI gate)
 
 ## Design
 
-The application uses an **orchestrator pattern** — a central coordinator manages the conversation turn lifecycle, delegating to stateless workers for LLM streaming and tool execution. See [ARCHITECTURE.md](ARCHITECTURE.md) for diagrams and detailed design rationale.
+The application uses flat async functions to manage the conversation turn lifecycle, with a `ToolExecutor` class handling API calls. See [ARCHITECTURE.md](ARCHITECTURE.md) for diagrams and detailed design rationale.
 
 **API quirks** discovered during development are documented in [DISCOVERIES.md](DISCOVERIES.md).
 
@@ -66,9 +81,6 @@ The application uses an **orchestrator pattern** — a central coordinator manag
 
 ```
 src/cli_chat/
-├── main.py          # entry point, signal wiring
-├── orchestrator.py  # turn lifecycle, history, LLM streaming, cancellation
-├── tools.py         # API calls with retry + quirk handling
-├── models.py        # pydantic models (settings, responses)
-└── display.py       # streaming output, spinners
+├── orchestrator.py  # entry point, turn lifecycle, LLM streaming, cancellation
+└── tools.py         # API calls with retry, response formatting
 ```
