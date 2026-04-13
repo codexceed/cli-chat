@@ -46,11 +46,8 @@ TOOL_DEFINITIONS = [
 ]
 
 MAX_RETRIES = 3
-REQUEST_TIMEOUT = 15.0
+REQUEST_TIMEOUT = 20.0
 MAX_THROTTLE_WAIT = 15
-
-
-# ── Retry infrastructure ─────────────────────────────────────────────────────────────────────────
 
 
 class _ThrottledError(Exception):
@@ -205,8 +202,11 @@ class ToolExecutor:
                 error=True,
             )
         except (httpx.RequestError, httpx.TimeoutException, httpx.DecodingError) as exc:
-            logger.error("Tool %s request failed: %s", name, exc)
-            return models.ToolResult(tool_call_id=tool_call.id, name=name, content=f"Request failed: {exc}", error=True)
+            detail = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+            logger.error("Tool %s request failed: %s", name, detail)
+            return models.ToolResult(
+                tool_call_id=tool_call.id, name=name, content=f"Request failed: {detail}", error=True
+            )
         except _RateLimitError as exc:
             logger.warning("Tool %s rate-limited after %d retries: %s", name, MAX_RETRIES, exc)
             return models.ToolResult(tool_call_id=tool_call.id, name=name, content=str(exc), error=True)
