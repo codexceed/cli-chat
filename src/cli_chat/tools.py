@@ -36,7 +36,10 @@ TOOL_DEFINITIONS = [
     },
 ]
 
-REQUEST_TIMEOUT = 15.0
+# Set above the research API's 15s server-side timeout (DISCOVERIES.md) so the
+# server's empty-response path always wins the race and we never raise our own
+# httpx.ReadTimeout (which can carry an empty message and looks like an infra bug).
+REQUEST_TIMEOUT = 20.0
 MAX_RETRIES = 3
 MAX_THROTTLE_WAIT = 15
 
@@ -117,8 +120,11 @@ class ToolExecutor:
             msg = f"API error ({exc.response.status_code}): {exc.response.text}"
             return _tool_result(tool_call_id, msg, error=True)
         except (httpx.RequestError, httpx.TimeoutException, httpx.DecodingError, RuntimeError) as exc:
-            logger.error("Tool %s request failed: %s", name, exc)
-            return _tool_result(tool_call_id, f"Request failed: {exc}", error=True)
+            # Some httpx exceptions (notably timeouts wrapping asyncio.TimeoutError) can
+            # carry an empty str(), so always include the class name for diagnosability.
+            detail = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+            logger.error("Tool %s request failed: %s", name, detail)
+            return _tool_result(tool_call_id, f"Request failed: {detail}", error=True)
 
     async def _get_weather(self, location: str, cancel_event: asyncio.Event) -> str:
         data = await self._request_with_retry("Weather", "/weather", {"location": location}, cancel_event)
