@@ -24,6 +24,22 @@ A command-line chat application with streaming LLM responses and tool calling. B
 make install
 ```
 
+### Without `uv`
+
+If you'd rather not install `uv`, use `pip` with a standard virtualenv:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+Then run the app directly via the installed entry point:
+
+```bash
+cli-chat
+```
+
 ## Usage
 
 ```bash
